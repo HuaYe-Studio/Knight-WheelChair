@@ -1,0 +1,109 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dd6df058aefd57e40afc210036fd4e1b, type: 3}
+  m_Name: Waves
+  m_EditorClassIdentifier: 
+  normalWaveDuration: 30
+  enemySpawnWarningTime: 0.5
+  waves:
+  - waveIndex: 1
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 5
+    spawnInterval: 5
+    spawnBatchCount: 1
+    e1Hp: 100
+    e1Attack: 8
+    designNote: 
+  - waveIndex: 2
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 10
+    spawnInterval: 3
+    spawnBatchCount: 1
+    e1Hp: 110
+    e1Attack: 10
+    designNote: 
+  - waveIndex: 3
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 18
+    spawnInterval: 1.7
+    spawnBatchCount: 1
+    e1Hp: 125
+    e1Attack: 12
+    designNote: 
+  - waveIndex: 4
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 14
+    spawnInterval: 2.1
+    spawnBatchCount: 1
+    e1Hp: 165
+    e1Attack: 16
+    designNote: 
+  - waveIndex: 5
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 17
+    spawnInterval: 1.8
+    spawnBatchCount: 1
+    e1Hp: 210
+    e1Attack: 20
+    designNote: 
+  - waveIndex: 6
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 21
+    spawnInterval: 1.4
+    spawnBatchCount: 1
+    e1Hp: 250
+    e1Attack: 24
+    designNote: 
+  - waveIndex: 7
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 44
+    spawnInterval: 1.35
+    spawnBatchCount: 2
+    e1Hp: 270
+    e1Attack: 24
+    designNote: 
+  - waveIndex: 8
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 60
+    spawnInterval: 1.5
+    spawnBatchCount: 3
+    e1Hp: 290
+    e1Attack: 26
+    designNote: 
+  - waveIndex: 9
+    isBossWave: 0
+    actualSpawnCountConfirmed: 1
+    actualSpawnCount: 75
+    spawnInterval: 1.2
+    spawnBatchCount: 3
+    e1Hp: 310
+    e1Attack: 28
+    designNote: 
+  - waveIndex: 10
+    isBossWave: 1
+    actualSpawnCountConfirmed: 0
+    actualSpawnCount: 0
+    spawnInterval: 3
+    spawnBatchCount: 2
+    e1Hp: 320
+    e1Attack: 30
+    designNote: 'N12: Boss + approximately 20 E1. Exact E1 cap is pending. Zero is
+      an unset value, not a decision to spawn no E1. Boss spawns in the first batch;
+      this wave has no time limit.'

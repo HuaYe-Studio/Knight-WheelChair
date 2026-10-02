@@ -1,0 +1,48 @@
+# Unity generated state (project root)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Bb]uild/
+/[Bb]uilds/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+/SafeNet Sentinel/
+/[Aa]ssets/[Aa]ssetStoreTools*
+
+# IDE and OS generated files
+.vs/
+.idea/
+.vscode/
+.gradle/
+*.csproj
+*.unityproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.opendb
+*.VC.db
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Crash reports / build output / licensing secrets
+sysinfo.txt
+*.log
+*.apk
+*.aab
+*.app
+*.unitypackage
+*.unitypackage.meta
+*.ulf
+*.alf
+.env
+.env.*
+
+# Do not ignore Assets/**/*.meta, Packages or ProjectSettings.

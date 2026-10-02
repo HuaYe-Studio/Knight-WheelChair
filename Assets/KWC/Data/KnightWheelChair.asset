@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a741fd65930742e4eac4636e56241ad0, type: 3}
+  m_Name: KnightWheelChair
+  m_EditorClassIdentifier: 
+  bossHp: 7500
+  bossMovement: 6
+  preferredDistance: 8
+  wanderRadius: 2.5
+  wanderSpeed: 4
+  wanderInterval: {x: 1, y: 2}
+  dashDistance: 12
+  dashSpeed: 24
+  dashDamage: 80
+  dashCooldown: 3.5
+  dashPrepareTime: 0.7
+  dashRecoveryTime: 0.6
+  dashHitCount: 1
+  normalContactDamage: 0

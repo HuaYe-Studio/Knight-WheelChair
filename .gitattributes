@@ -1,0 +1,34 @@
+* text=auto eol=lf
+*.md text eol=lf
+*.cs text eol=lf
+*.json text eol=lf
+*.asmdef text eol=lf
+*.meta text eol=lf whitespace=-blank-at-eol
+*.unity text eol=lf whitespace=-blank-at-eol
+*.prefab text eol=lf whitespace=-blank-at-eol
+*.asset text eol=lf whitespace=-blank-at-eol
+*.mat text eol=lf whitespace=-blank-at-eol
+*.shader text eol=lf
+*.cginc text eol=lf
+*.inputactions text eol=lf
+*.ps1 text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.tga binary
+*.psd binary
+*.fbx binary
+*.blend binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.dll binary
+
+# Preserve source documents and official TMP formatting without rewriting them.
+KWC_GDD.md whitespace=-blank-at-eol,-blank-at-eof
+数值设计.md whitespace=-blank-at-eol,-blank-at-eof
+"Assets/TextMesh Pro/**" -whitespace
