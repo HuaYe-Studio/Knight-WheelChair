@@ -5,7 +5,7 @@ namespace KWC.GameSystem
 {
     public class SpawnWarning:MonoBehaviour
     {
-        private float spawnWarningTime= 0.5f;
+        private float spawnWarningTime;
         private float passedWarningTime = 0f;
         private bool isStart = false;
         private bool isDone = false;
