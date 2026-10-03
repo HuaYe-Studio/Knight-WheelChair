@@ -152,12 +152,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   warningPool: {fileID: 1066315154}
-  totalEnemyCount: 5
-  enemyInterval: 5
-  generateCount: 1
-  spawnWarningTime: 0.5
-  waveTime: 30
+  waveSetConfig: {fileID: 11400000, guid: 02ba4d69c62a42d4c89e2bb949e05114, type: 2}
+  waveIndex: 1
   testEnemy: {fileID: 5109501656929289628, guid: ca44b90b205f488459f3228c90696b8d, type: 3}
+  useTestWaveTime: 0
+  testWaveTime: 30
 --- !u!4 &308383839
 Transform:
   m_ObjectHideFlags: 0
