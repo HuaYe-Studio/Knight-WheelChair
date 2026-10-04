@@ -157,6 +157,7 @@ MonoBehaviour:
   testEnemy: {fileID: 5109501656929289628, guid: ca44b90b205f488459f3228c90696b8d, type: 3}
   useTestWaveTime: 0
   testWaveTime: 30
+  isInWave: 0
 --- !u!4 &308383839
 Transform:
   m_ObjectHideFlags: 0
@@ -403,6 +404,53 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}
+--- !u!1 &2067996690
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2067996692}
+  - component: {fileID: 2067996691}
+  m_Layer: 0
+  m_Name: TestSpawnSchedulerDriver
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2067996691
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2067996690}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d8542464dae647d2a5a62d03e603bb8d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  spawnScheduler: {fileID: 308383838}
+  warningPool: {fileID: 1066315154}
+  testFrameRate: 0
+--- !u!4 &2067996692
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2067996690}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -411,3 +459,4 @@ SceneRoots:
   - {fileID: 2040582648}
   - {fileID: 1066315155}
   - {fileID: 308383839}
+  - {fileID: 2067996692}

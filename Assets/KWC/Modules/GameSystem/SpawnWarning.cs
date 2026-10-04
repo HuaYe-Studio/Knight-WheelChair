@@ -10,12 +10,12 @@ namespace KWC.GameSystem
         private bool isStart = false;
         private bool isDone = false;
 
-        private Action OnWarningDone;
+        private Action onWarningDone;
 
         public void InitializeWarning(float duration, Action onWarningDone)
         {
             passedWarningTime = 0f;
-            OnWarningDone = onWarningDone;
+            this.onWarningDone = onWarningDone;
             spawnWarningTime = duration;
             isStart = true;
             isDone = false;
@@ -36,8 +36,9 @@ namespace KWC.GameSystem
                 }
                 else
                 {
-                    OnWarningDone?.Invoke();
+                    Action onFinished = onWarningDone;
                     EndWarning();
+                    onFinished?.Invoke();
                 }
             }
         }
@@ -57,7 +58,7 @@ namespace KWC.GameSystem
 
         private void EndWarning()
         {
-            OnWarningDone = null;
+            onWarningDone = null;
             isDone = true;
             isStart = false;
         }

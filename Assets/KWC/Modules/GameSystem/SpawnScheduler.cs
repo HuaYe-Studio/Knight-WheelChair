@@ -1,8 +1,6 @@
 ﻿using System.Collections.Generic;
 using KWC.Data;
 using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.Serialization;
 
 namespace KWC.GameSystem
 {
@@ -13,9 +11,10 @@ namespace KWC.GameSystem
         [SerializeField] private WaveSetConfig waveSetConfig;
 
         [Header("生成测试区")]
+        [SerializeField] private int waveIndex = 1;
+        private int runIndex = 1;
         private WaveDefinition wave = null;
         private int spawnCount;
-        [SerializeField] private int waveIndex = 1;
         [SerializeField] private GameObject testEnemy;
         [SerializeField] private bool useTestWaveTime = false;
         [SerializeField] private float testWaveTime = 30f;
@@ -28,19 +27,32 @@ namespace KWC.GameSystem
         private List<SpawnWarning> livedSpawnWarnings = new List<SpawnWarning>();
         private List<GameObject> livedEnemy = new List<GameObject>();
 
-        private bool isInWave = false;
+        [SerializeField] private bool isInWave = false;
 
         private void Update()
         {
-            //test用
-            if (Keyboard.current.enterKey.wasPressedThisFrame)
-            {
-                InitializeWave();
-            }
             InWave();
         }
+
+        private void OnDisable()
+        {
+            StopWave();
+        }
+
         public void InitializeWave()
         {
+            if (waveSetConfig == null)
+            {
+                Debug.LogError("assign the Waves config before starting a wave.", this);
+                return;
+            }
+
+            if (warningPool == null)
+            {
+                Debug.LogError("assign the warning pool before starting a wave.", this);
+                return;
+            }
+
             if (!isInWave)
             {
                 WaveDefinition found = null;
@@ -100,17 +112,20 @@ namespace KWC.GameSystem
             generateIntervalTimer -= Time.deltaTime;
             if (generateIntervalTimer <= 0f && preparedEnemy < spawnCount)
             {
-                generateIntervalTimer = wave.SpawnInterval;
+                generateIntervalTimer += wave.SpawnInterval;
                 for (int count = 0; count < wave.SpawnBatchCount && preparedEnemy < spawnCount; count++)
                 {
                     Vector3 testSpawnPosition = GetTestSpawnPosition();
                     warningPool.Rent(testSpawnPosition, Quaternion.identity, go =>
                     {
+                        int runId = runIndex;
                         var spawnWarning = go.GetComponent<SpawnWarning>();
                         preparedEnemy++;
                         livedSpawnWarnings.Add(spawnWarning);
                         spawnWarning.InitializeWarning(waveSetConfig.EnemySpawnWarningTime, () =>
                         {
+                            if(runId != runIndex)
+                                return;
                             Debug.Log("Spawn warning Done,enemy is coming!");
                             GameObject enemy = Instantiate(testEnemy,go.transform.position, go.transform.rotation);
                             livedEnemy.Add(enemy);
@@ -127,24 +142,23 @@ namespace KWC.GameSystem
             }
         }
 
-        //这里暂时全部清理
         private void EndWave()
         {
-            foreach (var livedWarning in livedSpawnWarnings)
-            {
-                livedWarning.CancelWarning();
-                warningPool.Return(livedWarning.gameObject);
-            }
+            if(!isInWave)
+                return;
 
-            foreach (var enemy in livedEnemy)
-            {
-                Destroy(enemy);
-            }
-            livedSpawnWarnings.Clear();
-            livedEnemy.Clear();
-            isInWave = false;
+            ClearSpawnState();
             Debug.Log($"Wave{waveIndex} Finished!");
             waveIndex++;
+        }
+
+        public void StopWave()
+        {
+            if(!isInWave)
+                return;
+
+            ClearSpawnState();
+            Debug.Log($"Wave{waveIndex} Stopped!");
         }
 
         private Vector3 GetTestSpawnPosition()
@@ -168,5 +182,35 @@ namespace KWC.GameSystem
 
             Debug.Log("Boss波次未实现");
         }
+
+        //这里暂时全部清理,加入了判空检查
+        private void ClearSpawnState()
+        {
+            if (warningPool != null)
+            {
+                foreach (var livedWarning in livedSpawnWarnings)
+                {
+                    if(livedWarning == null)
+                        continue;
+
+                    livedWarning.CancelWarning();
+                    warningPool.Return(livedWarning.gameObject);
+                }
+            }
+
+            foreach (var enemy in livedEnemy)
+            {
+                if(enemy == null)
+                    continue;
+
+                Destroy(enemy);
+            }
+            livedSpawnWarnings.Clear();
+            livedEnemy.Clear();
+            runIndex++;
+            isInWave = false;
+        }
+
+
     }
 }
