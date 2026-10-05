@@ -173,21 +173,21 @@ void ReportEnemyDied(MonoBehaviour enemy, int lifeId);
 - `KWC.Editor.EnemyFsmChecks`：菜单 `KWC/Enemy/运行状态机逻辑自测`，或
   `-executeMethod KWC.Editor.EnemyFsmChecks.RunSelfTest`。日志出现 `KWC_ENEMY_FSM_SELFTEST_PASS` 即通过；
   **失败时批处理退出码为 1**（不再只打日志返回 0）。
-- **纯逻辑回归测试（脱离 Unity）**：`Tools/EnemyLogicTests/`，跑法
-  `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/EnemyLogicTests/run.ps1`。
+- **纯逻辑回归测试（脱离 Unity）**：本机工具，位于 `Logs/EnemyLogicTests/`（`Logs/` 已被 gitignore，**不入库**），跑法
+  `powershell -NoProfile -ExecutionPolicy Bypass -File Logs/EnemyLogicTests/run.ps1`。
   它链接 `Assets` 下的**真实源文件**（不是副本），用最小 UnityEngine 替身编译运行，
-  覆盖状态机护栏、终态锁定、死亡闸门、攻击间隔、冲刺起手/行程/撞墙、复用复位，共 59 项。
+  覆盖状态机护栏、终态锁定、死亡闸门、攻击间隔、冲刺起手/行程/撞墙、复用复位，
+  以及**控制器级回归**（真实 `Enemy1Controller` / `BossController` 驱动的攻击间隔与冲刺流程），共 73 项。
   通过打 `KWC_ENEMY_LOGIC_PASS`，失败返回非零退出码。
   > 存在原因：本机 Unity batchmode 启动即退（退出码 `0x2231F`），无法用它做逻辑验证。
-  > 该工具**已入库**，队友与审核者可照着跑。
-  > 其工程文件 `EnemyLogicTests.csproj` 被 `*.csproj` 规则忽略（那规则是为 Unity 自动生成的工程文件设的），
-  > 因此是用 `git add -f` 强制加入的；改动它时注意不要被误判为「未跟踪」。
-- **重复类型声明检查（面向整个 Assets）**：`Tools/EnemyLogicTests/check-duplicate-types.ps1`。
+  > 按「不改动仓库配置」的要求，工具放在已忽略的 `Logs/` 下，**不产生任何 git 变更**；
+  > 需要它的人可以从 PR 说明里取这 5 个文件（`run.ps1` / `check-duplicate-types.ps1` /
+  > `Program.cs` / `UnityShim.cs` / `EnemyLogicTests.csproj`），放到 `Logs/EnemyLogicTests/` 即可运行。
+- **重复类型声明检查（面向整个 Assets）**：同目录的 `check-duplicate-types.ps1`。
   扫描所有 `.cs`，报告「同一命名空间内重复声明同名类型」并返回非零退出码。
-  > 存在原因：逻辑测试只链接了部分源文件（例如 `PhysicsContactSource.cs` 需要物理替身而未被链接），
-  > 因此**结构上抓不到**「未被链接的文件里多了一份接口定义」。这个问题真实发生过一次
-  > （`IContactSource` 重复定义导致 CS0101，而当时所有测试都是绿的）。
-  > 该检查与链接范围无关，专门覆盖这一类。
+  > 存在原因：纯逻辑测试只链接部分源文件，结构上抓不到「未被链接的文件里多了一份接口定义」。
+  > 这个问题真实发生过一次（`IContactSource` 重复定义导致 CS0101，而当时所有测试都是绿的）。
+  > 现在 `PhysicsContactSource.cs` 已纳入测试编译范围，同类问题也会被测试本身抓到。
 - Prefab 交付按 Architecture 第 8 节：Enemy1 尺寸 1×1×1、Boss 2×2×2；**Collider 类型、移动平面与 Layer Matrix 未确认前不要设置**。
 
 ## 四、最小接线示例
