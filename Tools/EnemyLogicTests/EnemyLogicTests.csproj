@@ -38,6 +38,13 @@
     <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\IWallCheck.cs" />
     <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\IWanderPointSource.cs" />
     <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\SimpleMovementHandler.cs" />
+
+    <!-- 纳入 PhysicsContactSource：它会暴露 CS0101（重复声明）这类问题，
+         而物理回调本身不会在测试里执行，所以只需 UnityShim 的 Collider/Collision 替身即可编译。
+         这样「接口定义与实现被写到同一个文件」的错误会被测试本身抓到，
+         而不是依赖外部的独立检查脚本。 -->
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\PhysicsContactSource.cs" />
+
     <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\NoWallCheck.cs" />
     <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\RandomWanderPointSource.cs" />
     <Compile Include="..\..\Assets\KWC\Modules\Enemy\Bridge\ICombatBridge.cs" />
