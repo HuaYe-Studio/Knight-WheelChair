@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Enemy 模块纯逻辑测试。
+
+    链接的是 Assets 下的真实源文件（不是副本），所以这些测试覆盖的是实际发布代码。
+    链接范围只包含不依赖 Unity 物理 / 序列化 / 编辑器 API 的部分：
+      - 控制器、Brain、状态、状态机、事实与节流层都只用到 Transform/Vector/Mathf/Debug，
+        由 UnityShim.cs 提供替身，因此可以脱离 Unity 编译运行。
+      - PhysicsContactSource（物理回调）与 EnemyAiDebugOverlay（IMGUI）不参与，
+        它们不承载本次要验证的逻辑。
+
+    Unity 侧的状态机自测见 Assets/KWC/Editor/EnemyFsmChecks.cs（那条路径需要能启动 Unity）。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>EnemyLogicTests</AssemblyName>
+    <RootNamespace>EnemyLogicTests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 本目录：替身 + 测试主体 -->
+    <Compile Include="UnityShim.cs" />
+    <Compile Include="Program.cs" />
+
+    <!-- 项目源码：Enemy 模块 -->
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Core\StateMachineCore.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\DeathReportLatch.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\IContactSource.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\IMovementHandler.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\IWallCheck.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\IWanderPointSource.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\SimpleMovementHandler.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\NoWallCheck.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Context\RandomWanderPointSource.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Bridge\ICombatBridge.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Bridge\LogOnlyCombatBridge.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Enemy1\Enemy1Brain.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Enemy1\Enemy1States.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Enemy1\Enemy1Controller.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Boss\BossFacts.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Boss\BossStates.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\Enemy\Boss\BossController.cs" />
+
+    <!-- 项目源码：Enemy 依赖的配置类型（KWC.Data） -->
+    <Compile Include="..\..\Assets\KWC\Modules\GameSystem\Configuration\Enemy1Config.cs" />
+    <Compile Include="..\..\Assets\KWC\Modules\GameSystem\Configuration\BossConfig.cs" />
+
+    <!-- 项目源码：Core 契约 -->
+    <Compile Include="..\..\Assets\KWC\Core\IPlayerContext.cs" />
+  </ItemGroup>
+
+</Project>

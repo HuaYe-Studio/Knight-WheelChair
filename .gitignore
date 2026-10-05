@@ -43,6 +43,12 @@ sysinfo.txt
 *.ulf
 *.alf
 .env
+
+# Enemy 模块的验证工具（Tools/EnemyLogicTests）入库，队友与审核者照着跑。
+# 它的工程文件用 .msbuild 后缀，避免被上面的 *.csproj 规则（为 Unity 自动生成的工程文件而设）忽略。
+# 只排除构建产物。
+Tools/EnemyLogicTests/bin/
+Tools/EnemyLogicTests/obj/
 .env.*
 
 # Do not ignore Assets/**/*.meta, Packages or ProjectSettings.
