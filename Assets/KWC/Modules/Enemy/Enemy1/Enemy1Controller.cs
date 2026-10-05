@@ -37,12 +37,17 @@ namespace KWC.Enemy
         private ICombatBridge _combatBridge;
         private FactHealthSource _healthSource;
 
-        // 只缓存一次具体实现，用于复位；绝不在 Update 里反复 GetComponent（Architecture 第 13 节）。
-        private SimpleMovementHandler _movementForReset;
+        // 通过接口持有的移动处理器。复位统一走 IMovementHandler.ResetMovement，
+        // 而不是缓存具体实现 —— 否则换成别的实现（导航、Rigidbody）复用就失效。
+        private IMovementHandler _movement;
 
         private Enemy1Brain _brain;
         private Enemy1AttackThrottle _attackThrottle;
         private StateMachine<Enemy1StateId> _machine;
+
+        // 死亡闸门属于「这条命」，由控制器在每次复用时 Arm()，
+        // 不依赖任何状态的 OnExit 重新武装（那正是重复上报的成因）。
+        private readonly DeathReportLatch _deathLatch = new DeathReportLatch();
 
         private float _decisionAccumulator;
         private bool _isInitialized;
@@ -50,6 +55,12 @@ namespace KWC.Enemy
         private float _waveAttack;
 
         public bool IsInitialized => _isInitialized;
+
+        // 当前生命编号，严格递增。Combat/流程回调时必须带上它，用于判重与识别迟到回调。
+        public int LifeId => _deathLatch.LifeId;
+
+        // 这条命是否还没上报过死亡。供调试面板与测试断言使用。
+        public bool DeathReportArmed => _deathLatch.IsArmed;
 
         // 只读视图，给调试面板和测试用。这里没有任何 setter：
         // 状态只能通过转移改变，事实只能由它的来源改变。
@@ -84,7 +95,7 @@ namespace KWC.Enemy
                 return;
             }
 
-            _movementForReset = movement as SimpleMovementHandler;
+            _movement = movement;
 
             // 表 N03：E1 Attack Interval = 100 / E1 Attack Speed。
             // 在这里推导一次，并且不再另存一个独立可改的值（Architecture 第 4 节）。
@@ -93,7 +104,7 @@ namespace KWC.Enemy
             float moveSpeed = config != null ? config.E1Movement : 0f;
 
             _brain = new Enemy1Brain(this, playerContext, movement, contactSource, healthSource,
-                combatBridge, contactRange, moveSpeed, _waveAttack, stopWhileAttacking);
+                combatBridge, _deathLatch, contactRange, moveSpeed, _waveAttack, stopWhileAttacking);
 
             _attackThrottle = new Enemy1AttackThrottle(attackIntervalSeconds);
 
@@ -116,9 +127,15 @@ namespace KWC.Enemy
             _healthSource.ResetForReuse(_waveHp);
             _attackThrottle.Reset();
 
-            if (_movementForReset != null)
+            // 重新武装死亡闸门并推进生命编号。放在这里而不是 Dead 状态的 OnExit，
+            // 因为「下一条命开始」的正确标志是复用/初始化，不是某次状态离开。
+            _deathLatch.Arm();
+
+            if (_movement != null)
             {
-                _movementForReset.ResetMovement(Vector3.zero);
+                // 走接口而不是具体类型：任何 IMovementHandler 实现都必须能正确复位。
+                // 之前只复位 SimpleMovementHandler，换成别的实现后死亡再复用仍然不能动。
+                _movement.ResetMovement(Vector3.zero);
             }
 
             _decisionAccumulator = 0f;
@@ -152,8 +169,10 @@ namespace KWC.Enemy
             float step = _decisionAccumulator;
             _decisionAccumulator = 0f;
 
-            // 攻击间隔也在决策时钟上走，避免暂停或 timeScale 变化让节流与状态不同步。
-            _attackThrottle.Tick(step);
+            // 注意：这里**不**推进 _attackThrottle。
+            // 攻击间隔的唯一计时入口是 Enemy1ContactAttackState.OnUpdate —— 让节流只在
+            // 「仍然接触」时走，语义才正确（离开接触就不该继续充能）。
+            // 之前这里也 Tick 一次，等于把配置 1 秒的间隔变成 0.5 秒。
             _machine.Update(step);
         }
 
@@ -165,8 +184,10 @@ namespace KWC.Enemy
             return _isInitialized && _machine.TryRequestTransition(next, reason);
         }
 
-        // 由 Combat Health 经桥接调用。死亡是事件而不是需要轮询的条件，
-        // 事件绝不能被节流门槛吃掉，所以走打断通道。
+        // 由 Combat Health 经桥接调用，用于同步 HP 事实（只更新血量，不推断死亡）。
+        //
+        // 这里刻意**不再**用「血量 <= 0」去触发 Dead 转移：推断会重复触发，
+        // 因为零血时的每一次重复上报都会命中这个条件。死亡改由 ReportEnemyDied 显式通知。
         public void OnHealthReported(float current, float max)
         {
             if (!_isInitialized)
@@ -175,11 +196,30 @@ namespace KWC.Enemy
             }
 
             _healthSource.ReportHealth(current, max);
+        }
 
-            if (!_healthSource.IsAlive)
+        // 由 Combat Health 经桥接调用：这个敌人死了。lifeId 用来识别迟到的跨生命回调。
+        //
+        // 返回 true 表示本次通知被接受并已转发给状态机（走事件打断通道，不受节流门槛限制）。
+        // 返回 false 表示 lifeId 不是当前这条命 —— 池化对象已经被复用，
+        // 这条通知属于上一条命的旧回调，必须拒绝，否则新一轮实例会被立刻判死。
+        public bool ReportEnemyDied(int lifeId)
+        {
+            if (!_isInitialized)
             {
-                _machine.OnHostileInterrupt(Enemy1StateId.Dead, "血量归零");
+                return false;
             }
+
+            if (lifeId != _deathLatch.LifeId)
+            {
+                Debug.LogWarning("[Enemy] 拒绝了过期的死亡通知：收到的 lifeId=" + lifeId +
+                                 "，当前 lifeId=" + _deathLatch.LifeId +
+                                 "。这属于上一条命的迟到回调。");
+                return false;
+            }
+
+            _machine.OnHostileInterrupt(Enemy1StateId.Dead, "Combat 通知血量归零");
+            return true;
         }
 
         private void OnDisable()

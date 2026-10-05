@@ -177,8 +177,6 @@ namespace KWC.Enemy
         private readonly Enemy1Brain _brain;
         private readonly Enemy1AttackThrottle _throttle;
 
-        private bool _deathReported;
-
         public Enemy1DeadState(Enemy1Brain brain, Enemy1AttackThrottle throttle)
         {
             _brain = brain;
@@ -211,24 +209,19 @@ namespace KWC.Enemy
 
         public override void OnExit(IStateMachineHost<Enemy1StateId> host)
         {
-            // 为这个池化对象的下一条命重新武装。移动能力由 Initialize 重新打开，
-            // 所以这里只清本地闩锁。
-            _deathReported = false;
+            // 这里不再重新武装死亡闸门：闸门属于「这条命」，由控制器在复用/初始化时 Arm()。
+            // 之前在这里清标志，等于把「下一条命开始」绑在 OnExit 上，
+            // 而池化回收、场景卸载等路径并不保证 OnExit 与下一次 Initialize 严格配对，
+            // 结果就是同一条命被上报两次。
         }
 
-        public bool HasReportedDeath => _deathReported;
+        public bool HasReportedDeath => !_brain.DeathReportArmed;
 
         private void ReportDeathOnce()
         {
-            // 一次性死亡通知：每条命只上报一次。少了这个闩锁，一个迟到的回调
-            // 或者零血时的重复上报就会让掉落发两次。
-            if (_deathReported)
-            {
-                return;
-            }
-
-            _deathReported = true;
-            _brain.ReportDeath();
+            // 一次性死亡通知：每条命只上报一次。去重由 Brain 里的 DeathReportLatch 负责，
+            // 本状态只负责「到了 Dead 就该上报」这一件事。
+            _brain.TryClaimDeathReport(out _);
         }
     }
 }

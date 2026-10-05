@@ -127,6 +127,14 @@ namespace KWC.Enemy
         private TStateId _current;
         private TStateId? _next;
         private string _pendingReason = "none";
+
+        // 当前是否处于终态（IsTerminal 的状态，例如 Dead）。
+        //
+        // 终态必须是「稳定」的：进入之后任何来源的转移请求都不许生效，
+        // 包括事件打断。之前漏了这条，实测出现 Dead → ContactAttack → Dead 的往返，
+        // 于是「一次死亡」把死亡通知发了两次。
+        private bool _isInTerminalState;
+
         private float _timeInState;
         private bool _hasTransited;
         private bool _initialized;
@@ -294,6 +302,17 @@ namespace KWC.Enemy
                 return;
             }
 
+            // 终态锁定：死亡之后到达的任何打断（重复的 HP 上报、迟到的死亡回调）
+            // 都不许把状态机拉出终态。这正是 Dead → ContactAttack → Dead 往返的防线。
+            if (_isInTerminalState)
+            {
+                AddTrace("跳过  终态锁定，忽略事件打断 -> " + target);
+
+                // 顺手清掉可能残留的待处理转移，保证终态内部状态干净。
+                _next = null;
+                return;
+            }
+
             // 已经在目标状态里了：这不是失败，所以既不计数也不报错。
             // 迟到的死亡回调重复上报会走到这里。
             if (target.Equals(_current) && _interrupts.Count == 0)
@@ -311,6 +330,13 @@ namespace KWC.Enemy
         {
             if (!_initialized)
             {
+                return false;
+            }
+
+            // 终态锁定，同 OnHostileInterrupt。
+            if (_isInTerminalState)
+            {
+                LogRefusal(next, "终态锁定：'" + _current + "' 不接受任何转移");
                 return false;
             }
 
@@ -339,6 +365,9 @@ namespace KWC.Enemy
         }
 
         public IEnumerable<TStateId> RegisteredStates => _states.Keys;
+
+        // 当前状态是不是终态。调试面板与测试会读它。
+        public bool IsInTerminalState => _isInTerminalState;
 
         // 给人看的状态名，供调试面板和转移日志使用。只在显示或报警时调用，不在热路径上。
         public bool TryGetDisplayName(TStateId id, out string displayName)
@@ -416,6 +445,15 @@ namespace KWC.Enemy
             _timeInState = 0f;
             _hasTransited = false;
             _loggedStuckRequest = false;
+
+            // 终态锁定：进入终态的同时清掉所有待处理请求，保证终态从一开始就是干净的。
+            // 不清的话，一个在死亡之前就排好队的请求会在下一帧把状态机带出终态。
+            _isInTerminalState = _states[id].IsTerminal;
+            if (_isInTerminalState)
+            {
+                _next = null;
+                _interrupts.Clear();
+            }
 
             if (_enters.ContainsKey(id))
             {

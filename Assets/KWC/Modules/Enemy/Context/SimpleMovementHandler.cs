@@ -2,26 +2,10 @@ using UnityEngine;
 
 namespace KWC.Enemy
 {
-    // ============================================================================================
-    // 执行层：实体怎么动。与状态机分开，状态只表达意图（「朝这个点走」），不直接碰 Transform。
-    // ============================================================================================
-    public interface IMovementHandler
-    {
-        Vector3 Position { get; }
-
-        // 朝向归移动处理器管：它是「上一次移动的表现」，不是一个决策。
-        Vector3 Facing { get; }
-
-        void MoveToward(Vector3 target, float speed, float deltaTime);
-
-        // 立即停下。会被 OnExit 收尾路径调用，所以必须任何时候都安全。
-        void Stop();
-
-        void SetMovementEnabled(bool enabled);
-    }
-
     // --------------------------------------------------------------------------------------------
     // Enemy1 用的执行层实现。它完全不知道「状态」是什么。
+    //
+    // 文件名必须与类名一致，否则 Prefab 保存后重导入会显示 Missing Script。
     //
     // Collider 类型 / 移动平面 / Layer Matrix 都还没确认，所以这里只驱动 Transform，
     // 不假设 CharacterController，也不假设 Rigidbody 速度。等这些确认后，
@@ -90,7 +74,7 @@ namespace KWC.Enemy
             }
         }
 
-        // 复用时调用：池里的实例不能再留着上一个使用者的朝向。
+        // 复用时调用：池里的实例不能再留着上一个使用者的朝向，也不能还处在「被禁用」状态。
         public void ResetMovement(Vector3 facing)
         {
             _enabled = true;

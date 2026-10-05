@@ -37,8 +37,9 @@ namespace KWC.Enemy
         // 真正的读操作由 BossBrain 转发给状态，控制器不参与决策。
         private IWallCheck _wallCheck;
 
-        // 只缓存一次具体实现，用于复位；绝不在 Update 里反复 GetComponent。
-        private SimpleMovementHandler _movementForReset;
+        // 通过接口持有的移动处理器。复位统一走 IMovementHandler.ResetMovement，
+        // 而不是缓存具体实现 —— 否则换成别的实现（导航、Rigidbody）复用就失效。
+        private IMovementHandler _movement;
 
         private BossBrain _brain;
         private BossDashThrottle _dashThrottle;
@@ -50,11 +51,20 @@ namespace KWC.Enemy
 
         private StateMachine<BossStateId> _machine;
 
+        // 死亡闸门属于「这条命」，由控制器在每次复用时 Arm()。
+        private readonly DeathReportLatch _deathLatch = new DeathReportLatch();
+
         private float _decisionAccumulator;
         private bool _isInitialized;
         private float _waveHp;
 
         public bool IsInitialized => _isInitialized;
+
+        // 当前生命编号，严格递增。Combat/流程回调时必须带上它，用于判重与识别迟到回调。
+        public int LifeId => _deathLatch.LifeId;
+
+        // 这条命是否还没上报过死亡。供调试面板与测试断言使用。
+        public bool DeathReportArmed => _deathLatch.IsArmed;
 
         public StateMachine<BossStateId> Machine => _machine;
         public BossStateId CurrentStateId => _machine != null ? _machine.Current : BossStateId.None;
@@ -106,10 +116,11 @@ namespace KWC.Enemy
                 return;
             }
 
-            _movementForReset = movement as SimpleMovementHandler;
+            _movement = movement;
             _wanderPointSource = wanderPointSource;
             _wallCheck = wallCheck;
-            _brain = new BossBrain(this, playerContext, movement, healthSource, combatBridge, wallCheck, values);
+            _brain = new BossBrain(this, playerContext, movement, healthSource, combatBridge, wallCheck,
+                _deathLatch, values);
             _dashThrottle = new BossDashThrottle(values.DashCooldown);
             _dashContext = new BossDashContext();
 
@@ -139,9 +150,14 @@ namespace KWC.Enemy
             // 快照与命中记录属于上一次冲刺的两个不同事实，两个都要清。
             _dashContext.Reset();
 
-            if (_movementForReset != null)
+            // 重新武装死亡闸门并推进生命编号。放在这里而不是 Dead 状态的 OnExit，
+            // 因为「下一条命开始」的正确标志是复用/初始化，不是某次状态离开。
+            _deathLatch.Arm();
+
+            if (_movement != null)
             {
-                _movementForReset.ResetMovement(Vector3.zero);
+                // 走接口而不是具体类型：任何 IMovementHandler 实现都必须能正确复位。
+                _movement.ResetMovement(Vector3.zero);
             }
 
             _decisionAccumulator = 0f;
@@ -175,6 +191,22 @@ namespace KWC.Enemy
 
             // 冷却在决策时钟上走，暂停或 timeScale 变化都不会让它和状态不同步。
             _dashThrottle.Tick(step);
+
+            // ---- 冲刺起手判断：统一放在状态机之前 ------------------------------------------
+            //
+            // 不放在某个状态里，是因为「冲刺该不该起手」与「我现在是 Approach 还是 Wander」
+            // 无关，只与冷却和距离有关。放进某个状态就会出现这样的死角：
+            // Wander 里 ShouldApproach 优先于冲刺判断，玩家一超出 PreferredDistance
+            // 就转回 Approach，导致冲刺分支永远不可达（实测 Boss 完全不冲刺）。
+            //
+            // 放在这里之后，Approach 与 Wander 都能起手冲刺，不存在顺序问题。
+            // 转移申请表里必须同时声明 Approach → DashPrepare 与 Wander → DashPrepare 两条边，
+            // 否则状态机仍会把这次转移判为非法。
+            if (_brain != null && _brain.CanStartDash(_dashThrottle))
+            {
+                _machine.TryRequestTransition(BossStateId.DashPrepare, "冲刺冷却就绪");
+            }
+
             _machine.Update(step);
         }
 
@@ -184,7 +216,8 @@ namespace KWC.Enemy
             return _isInitialized && _machine.TryRequestTransition(next, reason);
         }
 
-        // 由 Combat Health 经桥接调用，走事件打断通道。
+        // 由 Combat Health 经桥接调用，用于同步 HP 事实（只更新血量，不推断死亡）。
+        // 死亡改由 ReportEnemyDied 显式通知，理由见 Enemy1Controller 的同类注释。
         public void OnHealthReported(float current, float max)
         {
             if (!_isInitialized)
@@ -193,11 +226,27 @@ namespace KWC.Enemy
             }
 
             _healthSource.ReportHealth(current, max);
+        }
 
-            if (!_healthSource.IsAlive)
+        // 由 Combat Health 经桥接调用：Boss 死了。lifeId 用来识别迟到的跨生命回调。
+        // 返回 false 表示 lifeId 不是当前这条命，调用方应忽略这次通知。
+        public bool ReportEnemyDied(int lifeId)
+        {
+            if (!_isInitialized)
             {
-                _machine.OnHostileInterrupt(BossStateId.Dead, "血量归零");
+                return false;
             }
+
+            if (lifeId != _deathLatch.LifeId)
+            {
+                Debug.LogWarning("[Enemy] 拒绝了过期的死亡通知：收到的 lifeId=" + lifeId +
+                                 "，当前 lifeId=" + _deathLatch.LifeId +
+                                 "。这属于上一条命的迟到回调。");
+                return false;
+            }
+
+            _machine.OnHostileInterrupt(BossStateId.Dead, "Combat 通知血量归零");
+            return true;
         }
 
         private void OnDisable()
@@ -221,6 +270,10 @@ namespace KWC.Enemy
             TransitionRule<BossStateId>[] rules =
             {
                 new TransitionRule<BossStateId>(BossStateId.Approach, BossStateId.Wander, 1),
+
+                // 冲刺可以从 Approach 直接起手。缺少这条边时状态机会拒绝该转移并报「非法转移」，
+                // 这是「Boss 永远不冲刺」的第二个原因 —— 即使状态请求了，转移表也会拦下。
+                new TransitionRule<BossStateId>(BossStateId.Approach, BossStateId.DashPrepare, 2),
                 new TransitionRule<BossStateId>(BossStateId.Wander, BossStateId.Approach, 1),
                 new TransitionRule<BossStateId>(BossStateId.Wander, BossStateId.DashPrepare, 2),
                 new TransitionRule<BossStateId>(BossStateId.DashPrepare, BossStateId.Dash, 1),
@@ -242,7 +295,7 @@ namespace KWC.Enemy
                 new StateBase<BossStateId>[]
                 {
                     new BossApproachState(_brain),
-                    new BossWanderState(_brain, _wanderPointSource, _dashThrottle, wanderMaxDwell),
+                    new BossWanderState(_brain, _wanderPointSource, wanderMaxDwell),
                     new BossDashPrepareState(_brain, _dashContext),
                     new BossDashState(_brain, _dashContext, dashHitRadius),
                     new BossDashRecoveryState(_brain, _dashThrottle),

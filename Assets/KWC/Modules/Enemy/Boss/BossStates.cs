@@ -29,8 +29,13 @@ namespace KWC.Enemy
 
     // --------------------------------------------------------------------------------------------
     // 状态：Approach。
-    // 只拥有移动决策，不拥有冲刺决策 —— 冲刺由 Wander 发起，
-    // 这样同一个决策帧里不可能出现「继续靠近」和「起手冲刺」互相竞争。
+    //
+    // 本状态只负责走路。冲刺起手判断**不在**这里，也不在 Wander 里，而在 BossController.Tick：
+    // 那里在调用状态机之前统一检查「冷却好了就冲刺」，所以 Approach/Wander 都不会把冲刺饿死。
+    //
+    // 为什么这样放：之前冲刺只允许从 Wander 起手，而 Wander 里 ShouldApproach 优先于冲刺判断，
+    // 玩家一超出 PreferredDistance 就退回本状态用速度 6 走路（追不上玩家速度 10），
+    // 冲刺分支永远不可达。把起手判断提到状态机之前，两个状态就都能冲刺，不存在顺序问题。
     // --------------------------------------------------------------------------------------------
     public sealed class BossApproachState : StateBase<BossStateId>
     {
@@ -46,7 +51,7 @@ namespace KWC.Enemy
 
         public override BossStateId? OnUpdate(IStateMachineHost<BossStateId> host, float deltaTime)
         {
-            // 顺序即显式优先级：死亡 → 玩家丢失 → 进入范围。
+            // 顺序即显式优先级：死亡 → 玩家丢失 → 已进入范围 → 走路。
             if (_brain.IsDead)
             {
                 return BossStateId.Dead;
@@ -83,7 +88,6 @@ namespace KWC.Enemy
     {
         private readonly BossBrain _brain;
         private readonly IWanderPointSource _pointSource;
-        private readonly BossDashThrottle _dashThrottle;
         private readonly float _maxStaySeconds;
 
         private Vector3 _targetPoint;
@@ -91,12 +95,10 @@ namespace KWC.Enemy
         private float _repickElapsed;
         private float _currentInterval;
 
-        public BossWanderState(BossBrain brain, IWanderPointSource pointSource, BossDashThrottle dashThrottle,
-            float maxStaySeconds)
+        public BossWanderState(BossBrain brain, IWanderPointSource pointSource, float maxStaySeconds)
         {
             _brain = brain;
             _pointSource = pointSource;
-            _dashThrottle = dashThrottle;
             _maxStaySeconds = maxStaySeconds;
         }
 
@@ -124,16 +126,11 @@ namespace KWC.Enemy
                 return null;
             }
 
-            // 玩家离开范围就重新追。这一条排在冲刺之前，
-            // 保证「该追了」不会被一个刚好变得合法的冲刺抢走。
+            // 玩家离开范围就回到 Approach。冲刺起手判断不在本状态里
+            // （见 BossController.Tick：冷却好了就冲刺），所以这里不会漏掉冲刺机会。
             if (_brain.ShouldApproach)
             {
                 return BossStateId.Approach;
-            }
-
-            if (_brain.CanStartDash(_dashThrottle))
-            {
-                return BossStateId.DashPrepare;
             }
 
             _repickElapsed += deltaTime;
@@ -252,8 +249,12 @@ namespace KWC.Enemy
     //
     // 这是 Boss 唯一允许提交伤害的状态，因为 Normal Contact Damage = 0：非 Dash 普通接触不造成伤害。
     //
+    // 两个距离概念必须分清（之前混用导致实测走 5 或 14.4 而不是 12）：
+    //   快照（SnapshotPosition）：只决定**方向**。玩家可能是移动目标，绝不能用它当终点。
+    //   Dash Distance：限制**从冲刺起点算起的总行程**，与快照远近无关。
+    //
     // 数据归属：快照属于 BossDashContext（DashPrepare 写），冷却属于 BossDashThrottle
-    // （DashRecovery 启动），命中计数属于本状态，因为它只在这一段冲刺里有意义。
+    // （DashRecovery 启动），命中计数与起点属于本状态，因为它们只在一次冲刺里有意义。
     // --------------------------------------------------------------------------------------------
     public sealed class BossDashState : StateBase<BossStateId>
     {
@@ -263,6 +264,10 @@ namespace KWC.Enemy
 
         private float _elapsed;
         private Vector3 _dashDirection;
+
+        // 冲刺起点。行程一律相对它计算，而不是相对快照 —— 快照只是方向参考点。
+        private Vector3 _dashOrigin;
+
         private bool _started;
         private int _strikeCount;
 
@@ -281,6 +286,9 @@ namespace KWC.Enemy
         public int SubmittedStrikeCount => _strikeCount;
         public int AcceptedStrikeCount { get; private set; }
 
+        // dev：本次冲刺已经走过的距离，供测试断言「不超过 DashDistance」。
+        public float TravelledDistance { get; private set; }
+
         public override void OnEnter(IStateMachineHost<BossStateId> host)
         {
             // 自己的状态数据在这里复位，绝不在构造函数里：
@@ -290,6 +298,7 @@ namespace KWC.Enemy
             _dashDirection = Vector3.zero;
             _strikeCount = 0;
             AcceptedStrikeCount = 0;
+            TravelledDistance = 0f;
 
             // 一次冲刺最多命中一次（表 N04 Dash Hit Count = 1）。
             _dashContext.ResetHitLatch();
@@ -311,7 +320,9 @@ namespace KWC.Enemy
                 return;
             }
 
+            // 快照只用来定方向。
             _dashDirection = toTarget.normalized;
+            _dashOrigin = _brain.SelfPosition;
             _started = true;
         }
 
@@ -329,32 +340,53 @@ namespace KWC.Enemy
 
             _elapsed += deltaTime;
 
-            // 表 N04：撞击地图墙体或边界时立即结束 Dash。
-            if (_brain.IsWallAhead(_dashDirection, _brain.Config.DashDistance))
+            // 行程从冲刺起点算，不受快照位置影响。
+            float remainingTravel = _brain.Config.DashDistance - TravelledDistance;
+            if (remainingTravel <= 0f)
             {
                 return BossStateId.DashRecovery;
             }
 
-            // 夹住步长，让冲刺精确停在快照位置，绝不冲过头。
-            // 少了这句，决策帧的最后一步会越过 Dash Distance。
-            float remainingDistance = Vector3.Distance(_brain.SelfPosition, _dashContext.SnapshotPosition);
-            if (remainingDistance <= 1e-4f)
+            // 只走本帧该走的一步，并且不超过剩余行程。
+            // 之前用「到快照的剩余距离」当上界：玩家离得近就提前结束（实测 5），
+            // 玩家离得远就超过配置距离（实测 14.4）。
+            float step = Mathf.Min(_brain.Config.DashSpeed * deltaTime, remainingTravel);
+            if (step <= 0f)
             {
                 return BossStateId.DashRecovery;
             }
 
-            float step = Mathf.Min(_brain.Config.DashSpeed * deltaTime, remainingDistance);
             Vector3 from = _brain.SelfPosition;
-            Vector3 to = from + (_dashDirection * step);
+            Vector3 intendedPosition = from + (_dashDirection * step);
 
-            _brain.MoveToward(to, _brain.Config.DashSpeed, deltaTime);
+            // 表 N04：撞击地图墙体或边界时立即结束 Dash。
+            // 查询用的是**本帧实际位移**，不是完整 DashDistance ——
+            // 之前每步都查完整距离，墙在前方 6 单位时一步未走就被判定撞墙（实测移动 0）。
+            bool blocked = _brain.TryDashStep(from, intendedPosition, out Vector3 allowedPosition);
 
-            // 命中判定针对刚刚走过的这一段，而不是当前位置：
-            // Dash Speed 是 24，只用当前位置判定会让冲刺从玩家身上穿过去。
-            TryStrikeAlong(from, to);
+            Vector3 actualStep = allowedPosition - from;
+            actualStep.y = 0f;
 
-            // 已经吃满了配置的 Dash Distance。
-            if (remainingDistance <= step)
+            if (actualStep.sqrMagnitude > 0f)
+            {
+                _brain.MoveToward(allowedPosition, _brain.Config.DashSpeed, deltaTime);
+            }
+
+            TravelledDistance += actualStep.magnitude;
+
+            // 命中判定针对本帧的**实际**位移段：Dash Speed 是 24，
+            // 只看当前位置会让冲刺从玩家身上穿过去，撞墙截断时也要按实际段算。
+            Vector3 actualEnd = from + actualStep;
+            TryStrikeAlong(from, actualEnd);
+
+            // 撞墙：按表 N04「Wall -> Stop」立即结束本次冲刺。
+            if (blocked)
+            {
+                return BossStateId.DashRecovery;
+            }
+
+            // 走满配置行程。
+            if (TravelledDistance >= _brain.Config.DashDistance - 1e-4f)
             {
                 return BossStateId.DashRecovery;
             }
@@ -485,8 +517,6 @@ namespace KWC.Enemy
         private readonly BossDashThrottle _dashThrottle;
         private readonly BossDashContext _dashContext;
 
-        private bool _deathReported;
-
         public BossDeadState(BossBrain brain, BossDashThrottle dashThrottle, BossDashContext dashContext)
         {
             _brain = brain;
@@ -520,22 +550,18 @@ namespace KWC.Enemy
 
         public override void OnExit(IStateMachineHost<BossStateId> host)
         {
-            // 为下一条命重新武装。移动能力由 Initialize 重新打开。
-            _deathReported = false;
+            // 这里不再重新武装死亡闸门：闸门属于「这条命」，由控制器在复用/初始化时 Arm()。
+            // 在 OnExit 里清标志会把「下一条命开始」绑在 OnExit 上，
+            // 而池化回收、场景卸载等路径并不保证 OnExit 与下一次 Initialize 严格配对。
         }
 
-        public bool HasReportedDeath => _deathReported;
+        public bool HasReportedDeath => !_brain.DeathReportArmed;
 
         private void ReportDeathOnce()
         {
             // 一次性死亡通知：每条命只上报一次，避免进入两次结算。
-            if (_deathReported)
-            {
-                return;
-            }
-
-            _deathReported = true;
-            _brain.ReportDeath();
+            // 去重由 Brain 里的 DeathReportLatch 负责，本状态只负责「到了 Dead 就该上报」。
+            _brain.TryClaimDeathReport(out _);
         }
     }
 }

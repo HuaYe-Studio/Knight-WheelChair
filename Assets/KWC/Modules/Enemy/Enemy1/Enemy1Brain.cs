@@ -23,8 +23,13 @@ namespace KWC.Enemy
         private readonly ICombatBridge _bridge;
         private readonly float _contactRange;
 
+        // 死亡闸门属于「这条命」，所以放在 Brain（每条命一个），而不是放在 Dead 状态里。
+        // 放在状态里就只能靠 OnExit 重新武装，而 OnExit 与「下一条命开始」并不总是严格配对。
+        private readonly DeathReportLatch _deathLatch;
+
         public Enemy1Brain(Enemy1Controller owner, IPlayerContext player, IMovementHandler movement,
             IContactSource contact, IFactHealthSource health, ICombatBridge bridge,
+            DeathReportLatch deathLatch,
             float contactRange, float moveSpeed, float contactAttackDamage, bool stopWhileAttacking)
         {
             _owner = owner;
@@ -33,6 +38,7 @@ namespace KWC.Enemy
             _contact = contact;
             _health = health;
             _bridge = bridge;
+            _deathLatch = deathLatch;
             _contactRange = contactRange;
             MoveSpeed = moveSpeed;
             ContactAttackDamage = contactAttackDamage;
@@ -102,18 +108,36 @@ namespace KWC.Enemy
             return _bridge.TrySubmitPlayerDamage(request);
         }
 
-        public void ReportDeath()
+        // 这条命是否还没上报过死亡。只读，供调试面板与测试断言使用。
+        public bool DeathReportArmed => _deathLatch == null || _deathLatch.IsArmed;
+
+        // 上报死亡。由 Dead 状态调用，但真正的去重在这里：
+        // 每条命只有第一次调用会真的送出，并且带上生命编号。
+        // 这样即使某个回收路径没走 OnExit、或者同一个状态被重进，也不会重复通知。
+        public bool TryClaimDeathReport(out int lifeId)
         {
-            _bridge.NotifyEnemyDied(_owner, false);
+            if (!_deathLatch.TryClaimDeathReport(out lifeId))
+            {
+                return false;
+            }
+
+            _bridge.NotifyEnemyDied(_owner, false, lifeId);
+            return true;
         }
     }
 
     // ============================================================================================
-    // 节流层。它既不是「世界是什么」，也不是「我在干什么」，
-    // 它只回答「允不允许现在做」。所以它单独存字段、单独用时钟，与状态无关。
+    // 节流层：接触攻击的「重复间隔计时器」。
+    //
+    // 它既不是「世界是什么」，也不是「我在干什么」，它只回答「允不允许现在再打一次」。
+    // 所以它单独存字段、单独用时钟，与状态无关。
     //
     // E1 Attack Interval = 100 / E1 Attack Speed（表 N03）。秒数由控制器推导好传进来，
     // 本类不读配置、也不自己造一个速率。
+    //
+    // 计时入口只有一个：Enemy1ContactAttackState 的 OnUpdate 负责 Tick。
+    // 控制器**不**再对这个计时器推进 —— 之前两边都 Tick，
+    // 配置 1 秒的间隔实际按 0.5 秒走，攻击频率翻倍。
     // ============================================================================================
     public sealed class Enemy1AttackThrottle
     {
@@ -142,6 +166,7 @@ namespace KWC.Enemy
 
         public bool HasAttacked => _hasAttacked;
 
+        // 只由接触状态在「仍然接触」时调用。
         public void Tick(float deltaTime)
         {
             if (deltaTime > 0f)
@@ -156,7 +181,10 @@ namespace KWC.Enemy
             _hasAttacked = true;
         }
 
-        // 节流状态属于实例，复用时必须清掉，否则池里下一个使用者一上线就处在冷却中间。
+        // 回到「可以立刻再打一次」的状态。
+        //
+        // 语义是「重新开始接触」：E1 首次有效接触立即攻击，所以每次进入接触状态都要回到就绪。
+        // 复用（池化）时也用它，避免下一个使用者一上线就处在冷却中间。
         public void Reset()
         {
             _elapsed = _intervalSeconds;

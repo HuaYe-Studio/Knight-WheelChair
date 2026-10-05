@@ -34,14 +34,6 @@ namespace KWC.Enemy
         public int DashHitCount;
         public float NormalContactDamage;
 
-        // dev：Approach 与 Wander 之间的滞回带宽。
-        //
-        // 表 N04 只给了一个阈值（「玩家超出该距离则主动靠近；进入范围后转为 Wander」）。
-        // 进入条件和退出条件用同一个数，正是抖动的根因，所以这里用比例推出退出带，
-        // 而不是再编一个距离。标为 dev 并登记在 Modules/Enemy/README.md 待策划确认；
-        // 正式规则出来之后这个比例就删掉，换成设计值。
-        public float WanderEnterRatio = 0.9f;
-
         // 表 N04：单次 Dash 最多造成一次伤害。
         public int DashHitCountClamped => DashHitCount < 1 ? 1 : DashHitCount;
 
@@ -195,8 +187,12 @@ namespace KWC.Enemy
         private readonly ICombatBridge _bridge;
         private readonly IWallCheck _wallCheck;
 
+        // 死亡闸门属于「这条命」，所以放在 Brain（每条命一个），而不是放在 Dead 状态里。
+        private readonly DeathReportLatch _deathLatch;
+
         public BossBrain(BossController owner, KWC.Core.IPlayerContext player, IMovementHandler movement,
-            IFactHealthSource health, ICombatBridge bridge, IWallCheck wallCheck, BossConfigValues config)
+            IFactHealthSource health, ICombatBridge bridge, IWallCheck wallCheck, DeathReportLatch deathLatch,
+            BossConfigValues config)
         {
             _owner = owner;
             _player = player;
@@ -204,6 +200,7 @@ namespace KWC.Enemy
             _health = health;
             _bridge = bridge;
             _wallCheck = wallCheck;
+            _deathLatch = deathLatch;
             Config = config;
         }
 
@@ -232,17 +229,29 @@ namespace KWC.Enemy
         public bool IsDead => _health != null && !_health.IsAlive;
 
         // 表 N04：「玩家超出该距离则主动靠近；进入范围后转为 Wander」。
-        // 滞回是必需的：规范只给了一个阈值，进入和退出用同一个数就是抖动，
-        // 所以两个方向用不同的带，退出带只在 Config.WanderEnterRatio 一处定义。
+        //
+        // 进出使用**同一个既定阈值 PreferredDistance（8）**，不再乘以任何比例 ——
+        // 之前引入的 0.9 带宽属未经设计确认的新数值，已按要求撤回。
+        //
+        // 已知风险（登记为待确认项，不用默认值掩盖）：进出门槛重合时，玩家停在 8 附近
+        // 可能造成 Approach 与 Wander 之间反复切换。表 N04 没有规定第二个阈值，
+        // 所以这里不自行发明带宽，改为在 Modules/Enemy/README.md 登记待策划确认。
         public bool ShouldApproach => DistanceToPlayer > Config.PreferredDistance;
 
-        public bool ShouldStopApproaching => DistanceToPlayer <= Config.PreferredDistance * Config.WanderEnterRatio;
+        public bool ShouldStopApproaching => DistanceToPlayer <= Config.PreferredDistance;
 
-        // 命名判定：值得起手冲刺，只有玩家已经跑出 Preferred Distance 时才成立。
-        // PreferredDistance 是唯一有设计来源的距离量。
+        // 命名判定：现在能不能起手冲刺。
+        //
+        // 判据只有「活着 + 有玩家 + 冷却就绪」，**刻意不含距离门槛**。
+        //
+        // 为什么去掉距离门槛（审核意见）：原来要求 ShouldApproach（距离 > PreferredDistance），
+        // 而这个条件同时又是 Wander → Approach 的出口条件，于是冲刺成了不可达分支 ——
+        // 玩家一超出阈值就转去走路，走路速度 6 追不上玩家 10，Boss 永远不冲刺。
+        // 现在按 GDD 的意图「冲刺是接近玩家的手段」：冷却好了就冲，Approach 与 Wander 都能起手。
+        // 起手判断统一放在 BossController.Tick，位于状态机之前，与所处状态无关。
         public bool CanStartDash(BossDashThrottle throttle)
         {
-            return !IsDead && HasPlayer && throttle != null && throttle.IsReady && ShouldApproach;
+            return !IsDead && HasPlayer && throttle != null && throttle.IsReady;
         }
 
         // ---- 执行（状态唯一能做的几件事）--------------------------------------------------
@@ -268,12 +277,25 @@ namespace KWC.Enemy
         }
 
         // 表 N04：撞击地图墙体或边界时立即结束 Dash。
-        // 待确认：Map 还没交付通行性查询，所以注入的检查目前是「一直报没墙」的占位实现。
-        // 调用点是真的，以后把 Map 的查询接进来，这里一行都不用改。
-        public bool IsWallAhead(Vector3 direction, float distance)
+        //
+        // 传入的是**本帧实际打算走的位移**，返回的是**本帧实际被允许到达的位置**。
+        // 之前接口是「朝某方向查询 DashDistance」，Dash 每一步都拿完整距离去查，
+        // 于是墙在前方 6 单位时一步未走就被判定撞墙（实测移动 0 单位）。
+        //
+        // 返回 true 表示这一步撞墙被截断，调用方应结束冲刺。
+        public bool TryDashStep(Vector3 from, Vector3 intendedPosition, out Vector3 allowedPosition)
         {
-            return _wallCheck != null &&
-                   _wallCheck.TryGetWallHit(_movement.Position, direction, distance, out _);
+            Vector3 displacement = intendedPosition - from;
+
+            if (_wallCheck == null)
+            {
+                // 没有撞墙检测实现时不做静默兜底判断：直接放行，并在控制器的启动警告里
+                // 已经说明过「Wall -> Stop 无法触发」。
+                allowedPosition = intendedPosition;
+                return false;
+            }
+
+            return _wallCheck.TryMove(from, displacement, out allowedPosition, out _);
         }
 
         // 提交伤害请求。返回 true 只表示请求已交出，不代表玩家掉血。
@@ -283,9 +305,19 @@ namespace KWC.Enemy
             return _bridge.TrySubmitPlayerDamage(request);
         }
 
-        public void ReportDeath()
+        // 这条命是否还没上报过死亡。只读，供调试面板与测试断言使用。
+        public bool DeathReportArmed => _deathLatch == null || _deathLatch.IsArmed;
+
+        // 上报死亡。由 Dead 状态调用，去重在这里：每条命只有第一次调用会真的送出，并带生命编号。
+        public bool TryClaimDeathReport(out int lifeId)
         {
-            _bridge.NotifyEnemyDied(_owner, true);
+            if (!_deathLatch.TryClaimDeathReport(out lifeId))
+            {
+                return false;
+            }
+
+            _bridge.NotifyEnemyDied(_owner, true, lifeId);
+            return true;
         }
     }
 }
