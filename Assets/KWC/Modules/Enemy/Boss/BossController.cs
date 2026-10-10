@@ -119,7 +119,7 @@ namespace KWC.Enemy
             _movement = movement;
             _wanderPointSource = wanderPointSource;
             _wallCheck = wallCheck;
-            _brain = new BossBrain(this, playerContext, movement, healthSource, combatBridge, wallCheck,
+            _brain = new BossBrain(this, playerContext, movement, combatBridge, wallCheck,
                 _deathLatch, values);
             _dashThrottle = new BossDashThrottle(values.DashCooldown);
             _dashContext = new BossDashContext();
@@ -202,7 +202,8 @@ namespace KWC.Enemy
             // 放在这里之后，Approach 与 Wander 都能起手冲刺，不存在顺序问题。
             // 转移申请表里必须同时声明 Approach → DashPrepare 与 Wander → DashPrepare 两条边，
             // 否则状态机仍会把这次转移判为非法。
-            if (_brain != null && _brain.CanStartDash(_dashThrottle))
+            if (_brain != null && _brain.CanStartDash(_dashThrottle) &&
+                (_machine.Current == BossStateId.Approach || _machine.Current == BossStateId.Wander))
             {
                 _machine.TryRequestTransition(BossStateId.DashPrepare, "冲刺冷却就绪");
             }
@@ -218,14 +219,15 @@ namespace KWC.Enemy
 
         // 由 Combat Health 经桥接调用，用于同步 HP 事实（只更新血量，不推断死亡）。
         // 死亡改由 ReportEnemyDied 显式通知，理由见 Enemy1Controller 的同类注释。
-        public void OnHealthReported(float current, float max)
+        public bool OnHealthReported(int lifeId, float current, float max)
         {
-            if (!_isInitialized)
+            if (!_isInitialized || lifeId != _deathLatch.LifeId)
             {
-                return;
+                return false;
             }
 
             _healthSource.ReportHealth(current, max);
+            return true;
         }
 
         // 由 Combat Health 经桥接调用：Boss 死了。lifeId 用来识别迟到的跨生命回调。

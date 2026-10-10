@@ -19,7 +19,6 @@ namespace KWC.Enemy
         private readonly IPlayerContext _player;
         private readonly IMovementHandler _movement;
         private readonly IContactSource _contact;
-        private readonly IFactHealthSource _health;
         private readonly ICombatBridge _bridge;
         private readonly float _contactRange;
 
@@ -28,7 +27,7 @@ namespace KWC.Enemy
         private readonly DeathReportLatch _deathLatch;
 
         public Enemy1Brain(Enemy1Controller owner, IPlayerContext player, IMovementHandler movement,
-            IContactSource contact, IFactHealthSource health, ICombatBridge bridge,
+            IContactSource contact, ICombatBridge bridge,
             DeathReportLatch deathLatch,
             float contactRange, float moveSpeed, float contactAttackDamage, bool stopWhileAttacking)
         {
@@ -36,7 +35,6 @@ namespace KWC.Enemy
             _player = player;
             _movement = movement;
             _contact = contact;
-            _health = health;
             _bridge = bridge;
             _deathLatch = deathLatch;
             _contactRange = contactRange;
@@ -74,7 +72,7 @@ namespace KWC.Enemy
         public bool IsTouchingPlayer => _contact != null && _contact.IsInContact;
 
         // 进度事实，归 Combat Health 所有：我是不是已经死了。
-        public bool IsDead => _health != null && !_health.IsAlive;
+        public bool IsDead => _deathLatch != null && !_deathLatch.IsArmed;
 
         // 窗口判定（不是纯事实）：实体此刻与玩家的交互关系。它是这一对阈值的唯一定义处，
         // 所以状态里不会出现裸写「距离 < x」的比较，滞回也只有一个家。

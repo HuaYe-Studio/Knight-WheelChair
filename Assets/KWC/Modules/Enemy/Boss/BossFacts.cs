@@ -11,8 +11,8 @@ namespace KWC.Enemy
     // ============================================================================================
 
     // --------------------------------------------------------------------------------------------
-    // 表 N04 的纯值快照。决策层依赖它而不是 ScriptableObject，这样决策层不加载资源也能测试，
-    // 而且没有任何状态能反手改配置。
+    // 表 N04 的值快照。决策层依赖它而不是 ScriptableObject，这样决策层不加载资源也能测试。
+    // 字段目前可写；Brain/状态约定只读取它，不能把它当成编译器强制只读的对象。
     //
     // 每一项都来自表 N04，这里不引入新数字（除了明确标注 dev 的滞回带宽与推导值）。
     // --------------------------------------------------------------------------------------------
@@ -183,7 +183,6 @@ namespace KWC.Enemy
         private readonly BossController _owner;
         private readonly KWC.Core.IPlayerContext _player;
         private readonly IMovementHandler _movement;
-        private readonly IFactHealthSource _health;
         private readonly ICombatBridge _bridge;
         private readonly IWallCheck _wallCheck;
 
@@ -191,13 +190,12 @@ namespace KWC.Enemy
         private readonly DeathReportLatch _deathLatch;
 
         public BossBrain(BossController owner, KWC.Core.IPlayerContext player, IMovementHandler movement,
-            IFactHealthSource health, ICombatBridge bridge, IWallCheck wallCheck, DeathReportLatch deathLatch,
+            ICombatBridge bridge, IWallCheck wallCheck, DeathReportLatch deathLatch,
             BossConfigValues config)
         {
             _owner = owner;
             _player = player;
             _movement = movement;
-            _health = health;
             _bridge = bridge;
             _wallCheck = wallCheck;
             _deathLatch = deathLatch;
@@ -226,7 +224,7 @@ namespace KWC.Enemy
         }
 
         // 进度事实，归 Combat Health 所有。
-        public bool IsDead => _health != null && !_health.IsAlive;
+        public bool IsDead => _deathLatch != null && !_deathLatch.IsArmed;
 
         // 表 N04：「玩家超出该距离则主动靠近；进入范围后转为 Wander」。
         //

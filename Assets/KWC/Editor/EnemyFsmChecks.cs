@@ -132,9 +132,9 @@ namespace KWC.Editor
         // 2. 合法转移要等滞回窗口过去，而且是延后不是丢弃 —— 这就是防抖动的规则。
         //
         // 时序必须严格：MinDwell = 0.05，步长 0.016。
-        // 第 1 帧（t=0.016）重新请求，第 2 帧（t=0.032）仍在窗口内，第 3 帧（t=0.048）仍在窗口内，
-        // 第 4 帧（t=0.064）越过窗口才执行。之前这里的 Update 次数与断言对不上，
-        // 造成 2 个断言失败。
+        // 初始帧走到 t=0.016 后排入普通请求；t=0.032 和 t=0.048 仍留在 A；
+        // 到 t=0.064 才执行 pending 请求。状态自己返回的意图只会在 OnUpdate 时入队，
+        // 所以这里显式 TryRequestTransition，测试的是「已排队请求受滞回约束」。
         private static void TestOneTransitionPerFrameAndHysteresis(StringBuilder report, ref int failures)
         {
             FixtureFacts facts = new FixtureFacts();
@@ -145,18 +145,17 @@ namespace KWC.Editor
             Check(report, ref failures, "起始状态为 A", machine.Current == TestStateId.A);
 
             facts.WorldFlag = true;
+            bool queued = machine.TryRequestTransition(TestStateId.B, "滞回窗口测试请求");
+            Check(report, ref failures, "窗口内合法转移成功排队", queued);
 
-            // 窗口内请求两次：必须被拒绝，而不是悄悄生效。
+            // 窗口内：请求保留，但不得提前执行。
             machine.Update(0.016f);
             machine.Update(0.016f);
             Check(report, ref failures, "滞回窗口内合法转移被延后", machine.Current == TestStateId.A);
 
-            // 同一批时间戳下再走两帧：越过 0.05 才生效。
+            // t=0.064 越过 0.05 才执行。
             machine.Update(0.016f);
-            Check(report, ref failures, "仍然在窗口内（t=0.048）", machine.Current == TestStateId.A);
-
-            machine.Update(0.016f);
-            Check(report, ref failures, "越过窗口后（t=0.064）转移生效", machine.Current == TestStateId.B);
+            Check(report, ref failures, "t=0.064 越过窗口后转移生效", machine.Current == TestStateId.B);
 
             // 执行了转移的那一帧不许再跑下一个状态的逻辑。
             Check(report, ref failures, "B 在进入的那一帧没有被执行", facts.StepB == 0);
@@ -232,7 +231,8 @@ namespace KWC.Editor
 
             // 先走一次真实的 A -> B 转移，这样才有东西可拆。
             facts.WorldFlag = true;
-            for (int i = 0; i < 10; i++)
+            // A 的请求在 t=0.064 排队，下一次 Update 才进入 B；再多推进就会让 B 请求 C。
+            for (int i = 0; i < 5; i++)
             {
                 machine.Update(0.016f);
             }

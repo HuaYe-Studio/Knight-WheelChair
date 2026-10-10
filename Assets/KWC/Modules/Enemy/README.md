@@ -4,7 +4,11 @@
 
 读取 `IPlayerContext`、Map 碰撞事实和配置，向 Combat 提交伤害。Combat Health 拥有 HP；Enemy 处理 Dead 行为，Game System 负责生成和回收。Enemy1 首次接触立即攻击。Boss 仅 Dash 造成伤害，单次最多一次，蓄力结束才锁位置快照，撞墙进入 Recovery。
 
-复用时清掉目标、Dead、冷却、Dash快照/命中记录。非击杀的波末回收不能请求掉落。首次冲刺时机、持续接触节奏、绕障、Wander选点等仍依 GDD 的待确认项处理。不要添加敌人种类或招式。
+复用时清掉目标、Dead、冷却、Dash快照/命中记录。非击杀的波末回收不能请求掉落。持续接触使用配置节拍，不会因 5 秒超时重进而额外首击；真正脱离后重接触是否重置仍待确认。绕障与 Wander 选点依 GDD 的待确认项处理。不要添加敌人种类或招式。
+
+### 本次阶段交付范围
+
+改动涵盖 Enemy1/Boss Controller、Brain/状态、Combat Bridge 接口、FSM Core、Enemy 自检与本说明。HP 同步和死亡通知均携带 `LifeId`；普通 HP 回调只更新事实，只有当前生命的显式死亡事件可进入 Dead。纯逻辑验证已覆盖 Enemy1、Boss 生命周期，12 秒连续接触和自然冲刺无 FSM Error。尚未接入真实 Enemy/Combat/Map，也未验证完整刷怪、战斗、死亡与回收链路。当前工作区没有 `ProjectSettings` 改动。
 
 > 本 README 只维护**对外接口**与**待确认项**。内部实现（三层分离、约定落实、目录组织）见 Architecture 与代码注释，不在这里重复。
 
@@ -20,7 +24,7 @@
 |---|---|---|---|
 | 玩家位置 | Player 实现 `KWC.Core.IPlayerContext` | Core 已有 | 可用 |
 | 移动执行 | Game System 接线注入 `IMovementHandler` | 已提供 `SimpleMovementHandler` | 可用，仅驱动 Transform |
-| 接触事实 | 物理 + Layer Matrix | 接口 `IContactSource` | **占位实现**：`PhysicsContactSource` 用「transform 相等」判定 |
+| 接触事实 | 物理 + Layer Matrix | 接口 `IContactSource` | **占位实现**：`PhysicsContactSource` 用「transform 相等」判定；Player 中仅为 `internal`，仍会编译进 Player，正式交付前需替换或移除 |
 | 撞墙事实 | Map 提供通行性查询 | 接口 `IWallCheck` | **未实现**，运行期用 `NoWallCheck`（永远报「没墙」） |
 | 追击目标点 | 本模块自带 `IWanderPointSource` | 接口 | 可用，**不做可达性校验** |
 | HP 事实 | Combat Health 往里报告 | `FactHealthSource` | 接口已定，**尚无真实调用方** |
@@ -34,11 +38,12 @@
 | `Enemy1Controller.Initialize(...)`<br>`BossController.Initialize(...)` | Game System | 唯一的接线入口，签名见下 |
 | `ResetForReuse()` | Game System | 池化复用时**必须**调用，见 1.4 |
 | `HealthFacts`（`FactHealthSource`） | Combat Health | 通过它把真实 HP 报告进来 |
-| `OnHealthReported(current, max)` | Combat Health 经桥接 | **只同步 HP 事实，不推断死亡**（见 1.3） |
+| `OnHealthReported(lifeId, current, max)` | Combat Health 经桥接 | 只接受当前生命编号，只同步 HP 事实，不推断死亡 |
 | `ReportEnemyDied(lifeId)` | Combat Health 经桥接 | **死亡的唯一入口**，返回 false 表示 lifeId 过期 |
 | `LifeId` / `DeathReportArmed` | 流程、Debug、测试 | 只读。lifeId 用于判重与识别迟到回调 |
-| `CurrentStateId` / `TimeInState` / `TransitionCount` / `LiveStateCount` / `Machine` | UI、Debug、测试 | 全部只读，无 setter |
-| `PlayerDamageRequest`（定义在 `Bridge/CombatBridge.cs`） | Combat 实现 `ICombatBridge` | 伤害请求与死亡通知，见 1.3 |
+| `CurrentStateId` / `TimeInState` / `TransitionCount` / `LiveStateCount` | UI、Debug、测试 | 只读诊断属性 |
+| `Machine` | 测试 / Debug | 返回运行时状态机实例；可用于审计和测试，不是只读快照，生产调用方不应经它驱动转移 |
+| `PlayerDamageRequest`（定义在 `Bridge/ICombatBridge.cs`） | Combat 实现 `ICombatBridge` | 伤害请求与死亡通知，见 1.3 |
 
 **接线签名（当前实现，可直接照抄）：**
 
@@ -65,7 +70,7 @@ bool TrySubmitPlayerDamage(PlayerDamageRequest request);
 void NotifyEnemyDied(MonoBehaviour enemy, bool isBoss, int lifeId);
 
 // 入向：Combat -> Enemy
-void ReportEnemyHealth(MonoBehaviour enemy, float current, float max);
+void ReportEnemyHealth(MonoBehaviour enemy, int lifeId, float current, float max);
 void ReportEnemyDied(MonoBehaviour enemy, int lifeId);
 ```
 
@@ -75,10 +80,10 @@ void ReportEnemyDied(MonoBehaviour enemy, int lifeId);
 
 **死亡通道（重要，涉及重复通知）：**
 
-- **死亡是事件，不是推断。** `OnHealthReported` 只更新 HP 事实，本模块**不会**再用「血量 <= 0」去触发死亡。
+- **死亡是事件，不是推断。** `OnHealthReported(lifeId, current, max)` 只更新 HP 事实，本模块不会用「血量 <= 0」去触发死亡；`LifeId` 不匹配的 HP 回调与死亡事件都会拒绝。
   之前那样做会重复触发：零血时每一次重复上报都满足条件，于是掉落发两次。
-- Combat 必须在敌人血量归零时调用 `ReportEnemyDied(enemy, lifeId)`，这是进入 Dead 的唯一入口。
-- **lifeId 必须原样回传**：它由 `LifeId` 属性读出，每次池化复用递增。lifeId 对不上的通知会被拒绝并打警告——那只能是上一条命的迟到回调，接受它会让新一轮实例一出生就被判死。
+- Combat Health Owner 提供 HP 同步与死亡事件；Enemy Controller 负责验证 `lifeId` 并接收。Game System/池化 Owner 在新生命初始化/复用时负责调用 `ResetForReuse()` 并将当前 `LifeId` 交给 Combat。Combat 必须在血量归零时调用 `ReportEnemyDied(enemy, lifeId)`，这是进入 Dead 的唯一入口。
+- **lifeId 必须原样回传**：它由 `LifeId` 属性读出，每次池化复用递增。Combat 在采集 HP/死亡结果时就要捕获该编号，并随异步/延迟回调原样携带；不得在发送回调前重新读取对象的当前编号。编号不符的 HP 与死亡输入都会被拒绝。
 - 反向 `NotifyEnemyDied` 同样带 lifeId：流程若在回调到达时发现对象已被复用，应当用 lifeId 判断并忽略，否则会给新一轮实例重复掉落。
 - **终态锁定**：状态机进入终态（`IsTerminal`，即 Dead）后会拒绝一切转移请求（含事件打断），并清空已排队的转移。这是「Dead → ContactAttack → Dead」往返的防线；离开终态只能通过 `ResetForReuse()`。
 
@@ -106,8 +111,9 @@ void ReportEnemyDied(MonoBehaviour enemy, int lifeId);
 | 命中载荷字段 | `Attacker`/`Damage`/`HitPoint`/`Kind` 为提案 | 可能需要补方向、暴击、来源 id |
 | 返回值语义 | 现为 `bool`（送达/未送达） | 是否要返回「生效/被忽略/无敌中」 |
 | Combat Health 的伤害入口 | `FactHealthSource.ReportHealth` 已留好，**无调用方** | 敌我掉血都不会发生 |
-| 死亡通道签名 | 已定：`ReportEnemyDied(enemy, lifeId)` 入向、`NotifyEnemyDied(enemy, isBoss, lifeId)` 出向；**待 Combat Owner 确认可接受** | 不接死亡通道则无法进入 Dead |
-| lifeId 是否需要进入 Combat/流程的死亡结果结构 | 本模块已提供 `LifeId`，是否需要上游保存 | 关系迟到回调能否被上游正确丢弃 |
+| `LifeId` / HP / 死亡通道 | 提供方：Enemy Controller；调用方：Combat Health（HP 与死亡入向）、流程（死亡出向接收）；Game System/池化 Owner 管理复用并把当前 ID 传给 Combat。已在本模块登记，仍需 Combat 与 Game System Owner 确认接入点和持有方式 | 回调必须携带发起时捕获的生命编号；不得在迟到回调时重新读取当前编号 |
+| `IMovementHandler.ResetMovement` | 提供方：Enemy 接口；调用方：Enemy Controller；实现方：移动执行器（当前 `SimpleMovementHandler`）；池化时由 Game System/池化 Owner 间接触发 | 接口和调用已落地；新移动实现须恢复朝向、启用状态及自身运动缓存 |
+| `IWallCheck.TryMove` | 提供方：Enemy 接口；调用方：Boss Brain/状态；实现方：Map Owner | 当前 `NoWallCheck` 是占位实现，只允许位移；待 Map 接入正式查询 |
 | 玩家 0.5 秒无敌由谁负责 | 未定 | 可能引起重复扣血 |
 
 ### 2.2 等待其他 Owner 交付
@@ -124,7 +130,7 @@ void ReportEnemyDied(MonoBehaviour enemy, int lifeId);
 
 | 项 | 当前实现 | 说明 |
 |---|---|---|
-| 持续接触节奏 / 重接触是否重置 | 离开接触只**停止计时、不清零** | 既不白送一次重置，也不让计时器暗跑。改 `OnExit`／`OnEnter` 一行 |
+| 持续接触节奏 / 重接触是否重置 | 连续接触时攻击节拍持续运行，不按 5 秒强制退出；脱离后停止计时，重接触是否重置待确认 | 当前持续接触不会重入状态并获得额外首击 |
 | 首次冲刺时机 | 冷却好了就冲，**不含距离门槛** | 见 2.4；距离门槛曾导致冲刺不可达，已移除 |
 | 绕障 | `IWanderPointSource` **不做可达性校验** | 待 Map 接口 + 策划规则 |
 | **Approach↔Wander 门槛重合** | 进出门槛同为既定阈值 `PreferredDistance = 8`，**带宽 0.9 已撤回** | 表 N04 只给一个阈值，第二个阈值需策划决定。**已知风险**：玩家停在 8 附近会造成判定反复翻转（逻辑测试实测 10 次采样翻转 9 次）。不发明默认值，登记待确认 |
@@ -142,7 +148,12 @@ void ReportEnemyDied(MonoBehaviour enemy, int lifeId);
 | **P2 Dash 把快照当终点** | 用「到快照的剩余距离」当行程上界：快照近就提前停（实测 5），远就超过配置（实测 14.4） | 行程改为从冲刺**起点**累计并以此限制 `DashDistance`；快照只用于决定方向 | `TestDashTravelsConfiguredDistance`（实测 12 / 12 / 6） |
 | **P2 撞墙每步查询完整距离** | 每步都用完整 `DashDistance` 查询，墙在前方 6 单位时一步未走就结束（实测移动 0） | `IWallCheck` 改为按**单步位移**查询并返回被允许的位置；命中判定也改用本帧实际位移段 | `TestDashStopsAtWallUsingActualStep`（实测停在 6，查询 3 次） |
 | **P2 复用只复位具体实现** | `ResetForReuse` 只处理 `SimpleMovementHandler`，换实现后死亡再复用仍不能动 | `ResetMovement` 提升到 `IMovementHandler` 接口，控制器只持有接口并按接口复位 | `TestResetForReuseUsesGenericMovementInterface` |
-| **P2 自测断言失败且退出码为 0** | ① 滞回测试的帧数与断言语义不符；② 批处理下失败只 `LogError`，不改退出码 | 重写时序断言；失败时在批处理下 `EditorApplication.Exit(1)` | 编辑器自测与 `Logs/logic-tests` |
+| **P2 自测断言失败且退出码为 0** | ① 滞回测试的帧数与断言语义不符；② 批处理下失败只 `LogError`，不改退出码 | pending 普通请求改为受滞回门槛约束；失败时在批处理下 `EditorApplication.Exit(1)` | `Assets/KWC/Editor/EnemyFsmChecks.cs` 与 `Tools/EnemyLogicTests/` |
+| **P2 旧 HP 同步可杀死复用后的新生命** | HP 回调没有 `LifeId`，Brain 又用零 HP 推断 Dead | HP 同步带 `LifeId` 并由 Controller 校验；HP 只更新事实，死亡只由当前生命的显式事件触发 | `TestControllerHealthLifecycleIsGenerationScoped`（Enemy1 + Boss） |
+| **P2 持续接触超时重入造成过密攻击** | `ContactAttack` 5 秒后退出，重入时重置节流并首击 | 移除强制超时退出；持续接触留在当前状态按原节拍攻击 | 30/60 fps 各 12 秒控制器回归 |
+| **P2 Boss 冲刺期间反复申请起手** | 冷却在 Recovery 才开始，DashPrepare/Dash 中仍由 Controller 申请 DashPrepare | 只在 Approach / Wander 申请起手；这两态仍保留冲刺优先级 | 24 秒自然冲刺控制器回归并检查 FSM Error |
+| **P2 状态机滞回自检与执行顺序不一致** | pending 普通请求在滞回门槛之前执行，导致合法转移不等待最短停留 | 普通请求待滞回门槛通过后执行；事件打断仍优先 | 真实 `StateMachineCore` 自检与纯逻辑回归 |
+| **P2 最小接线漏初始化接触事实源** | `PhysicsContactSource` 未设置玩家 Transform 时拒绝物理回调 | 示例在注入 Controller 前调用 `Initialize(playerContext.EntityTransform)`，池化 Owner 管 `ResetContact()` | 需在真实 Unity 场景验证物理回调；本轮纯逻辑测试不覆盖真实 Physics |
 
 ### 2.5 dev 占位值（**不是设计值**，全部标 `dev` 前缀，确认后必须替换）
 
@@ -173,16 +184,13 @@ void ReportEnemyDied(MonoBehaviour enemy, int lifeId);
 - `KWC.Editor.EnemyFsmChecks`：菜单 `KWC/Enemy/运行状态机逻辑自测`，或
   `-executeMethod KWC.Editor.EnemyFsmChecks.RunSelfTest`。日志出现 `KWC_ENEMY_FSM_SELFTEST_PASS` 即通过；
   **失败时批处理退出码为 1**（不再只打日志返回 0）。
-- **纯逻辑回归测试（脱离 Unity）**：本机工具，位于 `Logs/EnemyLogicTests/`（`Logs/` 已被 gitignore，**不入库**），跑法
-  `powershell -NoProfile -ExecutionPolicy Bypass -File Logs/EnemyLogicTests/run.ps1`。
+- **纯逻辑回归测试（脱离 Unity）**：可复现工具位于仓库 `Tools/EnemyLogicTests/`，跑法
+  `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/EnemyLogicTests/run.ps1`。
   它链接 `Assets` 下的**真实源文件**（不是副本），用最小 UnityEngine 替身编译运行，
   覆盖状态机护栏、终态锁定、死亡闸门、攻击间隔、冲刺起手/行程/撞墙、复用复位，
-  以及**控制器级回归**（真实 `Enemy1Controller` / `BossController` 驱动的攻击间隔与冲刺流程），共 73 项。
+  以及**控制器级回归**（真实 `Enemy1Controller` / `BossController` 驱动的生命周期、12 秒接触节拍与冲刺流程），当前 96 项，另直接执行 `EnemyFsmChecks.RunSelfTest` 的 52 项断言。
   通过打 `KWC_ENEMY_LOGIC_PASS`，失败返回非零退出码。
-  > 存在原因：本机 Unity batchmode 启动即退（退出码 `0x2231F`），无法用它做逻辑验证。
-  > 按「不改动仓库配置」的要求，工具放在已忽略的 `Logs/` 下，**不产生任何 git 变更**；
-  > 需要它的人可以从 PR 说明里取这 5 个文件（`run.ps1` / `check-duplicate-types.ps1` /
-  > `Program.cs` / `UnityShim.cs` / `EnemyLogicTests.csproj`），放到 `Logs/EnemyLogicTests/` 即可运行。
+  > 测试工程和完整复现脚本均已入库。它是源文件级组合验证，不模拟真实 Unity 物理碰撞，也不代表真实刷怪、Combat 或 Map 链路已接通。
 - **重复类型声明检查（面向整个 Assets）**：同目录的 `check-duplicate-types.ps1`。
   扫描所有 `.cs`，报告「同一命名空间内重复声明同名类型」并返回非零退出码。
   > 存在原因：纯逻辑测试只链接部分源文件，结构上抓不到「未被链接的文件里多了一份接口定义」。
@@ -204,12 +212,16 @@ Prefab 上需要的组件与调用顺序（Game System 负责执行；这里给�
 var controller = enemyGo.GetComponent<Enemy1Controller>();
 var wallCheck  = (IWallCheck)new NoWallCheck();          // 待 Map 提供通行性查询
 var bridge     = enemyGo.GetComponent<LogOnlyCombatBridge>();
+var contact    = enemyGo.GetComponent<PhysicsContactSource>();
 var health     = new FactHealthSource(waveHp);           // HP 事实视图，唯一写入方是 Combat
+
+// 先初始化接触事实源，再注入 Controller；Game System 负责传入玩家实体 Transform。
+contact.Initialize(playerContext.EntityTransform);
 
 controller.Initialize(
     playerContext,                                        // KWC.Core.IPlayerContext
     enemyGo.GetComponent<SimpleMovementHandler>(),
-    enemyGo.GetComponent<PhysicsContactSource>(),
+    contact,
     bridge,
     enemy1Config,                                         // Data/Enemy1.asset
     health,
@@ -229,15 +241,18 @@ boss.Initialize(
     knightWheelChairConfig.BossHp,
     seed);
 
-// ---- 复用（对象池）----
+// ---- 复用（对象池 / Game System 组合责任）----
+contact.ResetContact();       // Game System 在复用边界清除上一轮物理接触事实
 controller.ResetForReuse();   // 必须；它恢复移动、重新武装死亡闸门、递增 lifeId
 
 // ---- 由 Combat 驱动死亡（唯一入口）----
 controller.ReportEnemyDied(controller.LifeId);   // lifeId 必须原样回传，否则会被拒绝
+controller.OnHealthReported(controller.LifeId, currentHp, maxHp); // 同步也必须传入采样时捕获的 lifeId
 ```
 
 注意：
 - `Initialize` 之前不要依赖 `Start`/`OnEnable`；`PrefabPool.Rent` 会先调初始化委托再激活。
+- 对象池/组合层负责在新一轮初始化前调用 `PhysicsContactSource.Initialize(playerTransform)`，并在复用边界调用 `ResetContact()`；Controller 不拥有该物理事实。
 - 两个 `Controller` 都必须满足「脚本文件名 = 类名」，否则 Prefab 保存重导入后丢脚本。
 - `PhysicsContactSource` 目前用「transform 相等」兜底判定接触，会每次使用警告一次；
   Layer Matrix 确认后调用 `SetContactFilter` 接上正式过滤。

@@ -58,7 +58,7 @@ namespace KWC.Enemy
         // ---- 入向：Combat -> Enemy --------------------------------------------------------
 
         // 同步 HP 事实。只更新血量，**不推断死亡**。
-        void ReportEnemyHealth(MonoBehaviour enemy, float current, float max);
+        void ReportEnemyHealth(MonoBehaviour enemy, int lifeId, float current, float max);
 
         // Combat Health 在某个敌人的血量归零时调用，是这个敌人进入 Dead 的唯一入口。
         //

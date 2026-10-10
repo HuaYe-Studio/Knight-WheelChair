@@ -14,8 +14,8 @@ namespace KWC.Enemy
     // 这里只接受 transform 恰好等于注入的玩家 Transform 的碰撞体；
     // 它每个组件只警告一次，让「正在用临时方案」这件事始终可见，并且绝不去猜 Layer。
     //
-    // 用 #if 隔开是刻意的：开发捷径不许进 player 构建。
-    // 正式实现接上后，运行时代码只依赖 IContactSource。
+    // #if 只控制类型可见性：Editor 中 public 以便 Inspector 接线，Player 中 internal；
+    // 这并不会从 Player 构建排除该占位实现。正式接入时仍需替换或移除它，运行时代码依赖 IContactSource。
     // --------------------------------------------------------------------------------------------
 #if UNITY_EDITOR
     public sealed class PhysicsContactSource : MonoBehaviour, IContactSource

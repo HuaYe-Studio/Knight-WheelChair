@@ -54,12 +54,12 @@ namespace KWC.Enemy
                       " 对象=" + (enemy != null ? enemy.name : "<null>"));
         }
 
-        public void ReportEnemyHealth(MonoBehaviour enemy, float current, float max)
+        public void ReportEnemyHealth(MonoBehaviour enemy, int lifeId, float current, float max)
         {
             // 占位：真实实现应把 current/max 转发给目标 Enemy1Controller.OnHealthReported
             // 或 BossController.OnHealthReported。这里只记录，避免伪造血量。
             Debug.Log("[Enemy] 收到 HP 同步（占位）enemy=" +
-                      (enemy != null ? enemy.name : "<null>") +
+                      (enemy != null ? enemy.name : "<null>") + " lifeId=" + lifeId +
                       " current=" + current + " max=" + max);
         }
 

@@ -28,9 +28,6 @@ namespace KWC.Enemy
         [Tooltip("dev：决策降频。敌人 AI 不需要每帧想一次，表现层继续使用上一次的决策结果。")]
         [SerializeField] private float decisionInterval = 0.1f;
 
-        [Tooltip("dev：接触状态的兜底最长停留。防止接触永不解触时死锁，属于保险丝而非玩法规则。")]
-        [SerializeField] private float contactMaxDwell = 5f;
-
         [Tooltip("dev：接触攻击时是否停下。GDD 未规定，默认停下以减少穿插。")]
         [SerializeField] private bool stopWhileAttacking = true;
 
@@ -103,7 +100,7 @@ namespace KWC.Enemy
             float attackIntervalSeconds = attackSpeed > 0f ? 100f / attackSpeed : 0f;
             float moveSpeed = config != null ? config.E1Movement : 0f;
 
-            _brain = new Enemy1Brain(this, playerContext, movement, contactSource, healthSource,
+            _brain = new Enemy1Brain(this, playerContext, movement, contactSource,
                 combatBridge, _deathLatch, contactRange, moveSpeed, _waveAttack, stopWhileAttacking);
 
             _attackThrottle = new Enemy1AttackThrottle(attackIntervalSeconds);
@@ -188,14 +185,15 @@ namespace KWC.Enemy
         //
         // 这里刻意**不再**用「血量 <= 0」去触发 Dead 转移：推断会重复触发，
         // 因为零血时的每一次重复上报都会命中这个条件。死亡改由 ReportEnemyDied 显式通知。
-        public void OnHealthReported(float current, float max)
+        public bool OnHealthReported(int lifeId, float current, float max)
         {
-            if (!_isInitialized)
+            if (!_isInitialized || lifeId != _deathLatch.LifeId)
             {
-                return;
+                return false;
             }
 
             _healthSource.ReportHealth(current, max);
+            return true;
         }
 
         // 由 Combat Health 经桥接调用：这个敌人死了。lifeId 用来识别迟到的跨生命回调。
@@ -251,7 +249,7 @@ namespace KWC.Enemy
                 new StateBase<Enemy1StateId>[]
                 {
                     new Enemy1ChaseState(_brain),
-                    new Enemy1ContactAttackState(_brain, _attackThrottle, contactMaxDwell),
+                    new Enemy1ContactAttackState(_brain, _attackThrottle),
                     new Enemy1DeadState(_brain, _attackThrottle)
                 },
                 rules);

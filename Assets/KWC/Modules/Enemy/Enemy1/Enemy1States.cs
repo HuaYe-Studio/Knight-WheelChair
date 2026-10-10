@@ -82,15 +82,13 @@ namespace KWC.Enemy
     {
         private readonly Enemy1Brain _brain;
         private readonly Enemy1AttackThrottle _throttle;
-        private readonly float _maxDwellSeconds;
 
         private bool _struckThisEntry;
 
-        public Enemy1ContactAttackState(Enemy1Brain brain, Enemy1AttackThrottle throttle, float maxDwellSeconds)
+        public Enemy1ContactAttackState(Enemy1Brain brain, Enemy1AttackThrottle throttle)
         {
             _brain = brain;
             _throttle = throttle;
-            _maxDwellSeconds = maxDwellSeconds;
         }
 
         public override Enemy1StateId Id => Enemy1StateId.ContactAttack;
@@ -130,13 +128,6 @@ namespace KWC.Enemy
 
             _throttle.Tick(deltaTime);
             TryStrike();
-
-            // 必有出口：即使接触永远结束不了（比如碰撞体卡在一起），本状态也不许无限期停留。
-            // 这是保险丝，不是玩法规则。
-            if (host.TimeInState >= _maxDwellSeconds)
-            {
-                return Enemy1StateId.Chase;
-            }
 
             return null;
         }

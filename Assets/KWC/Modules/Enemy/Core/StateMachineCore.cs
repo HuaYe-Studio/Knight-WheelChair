@@ -238,6 +238,7 @@ namespace KWC.Enemy
             // 初始进入不算一次转移：不需要为「从无到初始状态」写一条边。
             _liveStateCount = 0;
             Enter(initial, "初始");
+            _hasTransited = true;
         }
 
         // 唯一的节拍入口。由控制器每帧调用一次（并按决策降频），绝不从物理回调、
@@ -260,18 +261,18 @@ namespace KWC.Enemy
                 return;
             }
 
-            // 2. 处理 OnEnter 期间排队的请求（OnEnter 自己不允许转移）。
+            // 2. 滞回：合法转移被延后，但绝不会被丢掉，等门槛开了就执行。
+            if (_hasTransited && _timeInState < MinDwell)
+            {
+                return;
+            }
+
+            // 3. 处理 OnEnter 期间排队的请求。普通请求同样受滞回门槛约束。
             if (_next.HasValue)
             {
                 TStateId target = _next.Value;
                 _next = null;
                 SafeTransition(target, _pendingReason);
-                return;
-            }
-
-            // 3. 滞回：合法转移被延后，但绝不会被丢掉，等门槛开了就执行。
-            if (_hasTransited && _timeInState < MinDwell)
-            {
                 return;
             }
 
@@ -437,6 +438,7 @@ namespace KWC.Enemy
             _hasTransited = false;
             _timeInState = 0f;
             Enter(_initial, reason);
+            _hasTransited = true;
         }
 
         private void Enter(TStateId id, string reason)
