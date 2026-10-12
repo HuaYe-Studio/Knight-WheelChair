@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace KWC
+namespace KWC.UI
 {
     public class PauseMenu : MonoBehaviour
     {
