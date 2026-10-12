@@ -1,9 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
+using KWC.GameSystem;
 using UnityEngine;
 using UnityEngine.UI; // 如果需要使用Unity中UI相关的组件、方法，需要引用此命名空间
 
-namespace KWC
+namespace KWC.UI
 {
     public class StartGameButton : MonoBehaviour
     {
@@ -13,9 +14,12 @@ namespace KWC
         
         // 按钮组件
         private Button MainMenu_StartGameButton;
+        // GameManager
+        private GameManager gameManager;
 
         void Awake()
         {
+            gameManager = GameObject.Find("GameManager").GetComponent<GameManager>();
             // 获取对象本身的按钮（Button）组件
             MainMenu_StartGameButton = GetComponent<Button>();
         }
@@ -30,6 +34,7 @@ namespace KWC
         void SendStartGameRequest()
         {
             // 发送请求逻辑
+            gameManager.StartGame();
             Debug.Log("“开始游戏”按键被点击，已发送“开始游戏”请求。");
         }
         #endregion

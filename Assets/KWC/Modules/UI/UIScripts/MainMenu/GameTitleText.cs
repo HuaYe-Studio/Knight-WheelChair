@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 
-namespace KWC
+namespace KWC.UI
 {
     public class GameTitleText : MonoBehaviour
     {

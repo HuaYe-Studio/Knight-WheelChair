@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace KWC
+namespace KWC.UI
 {
     public class ExitGameButton : MonoBehaviour
     {
