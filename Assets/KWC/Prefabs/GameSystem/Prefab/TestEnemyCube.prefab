@@ -11,7 +11,10 @@ GameObject:
   - component: {fileID: 7181377554520421713}
   - component: {fileID: 6127414451000114018}
   - component: {fileID: 2878809010131218840}
-  - component: {fileID: 6601456143524579992}
+  - component: {fileID: 3747777547957325947}
+  - component: {fileID: 5168734892779691577}
+  - component: {fileID: 4446653807963566104}
+  - component: {fileID: 3039709736093860359}
   m_Layer: 0
   m_Name: TestEnemyCube
   m_TagString: Untagged
@@ -84,24 +87,55 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!65 &6601456143524579992
-BoxCollider:
+--- !u!114 &3747777547957325947
+MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5109501656929289628}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
   m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 1, y: 1, z: 1}
-  m_Center: {x: 0, y: 0, z: 0}
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1fa46dfcfa27c7348b46c0813ec98095, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  contactRange: 1.2
+  decisionInterval: 0.1
+  stopWhileAttacking: 1
+--- !u!114 &5168734892779691577
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5109501656929289628}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 77a0b7bf7f9ccf14ca3c57717781370a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &4446653807963566104
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5109501656929289628}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 03835e5bd35bdc1448579bda6fb5c43e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  updateFacing: 1
+--- !u!114 &3039709736093860359
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5109501656929289628}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e114271c575b4a4eafdce1a3f5b607a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
