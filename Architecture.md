@@ -144,7 +144,7 @@ flowchart LR
 
 ## 8. Prefab 组成与开发边界
 
-本阶段实际提供 `Prefabs/GameSystem/GameManager.prefab`，两场景各实例化一次，序列化引用 DefaultGameConfig。其余 Prefab 由 Owner 按下表交付，当前不生成无行为空壳来假装完成，也不提前选择未确认的物理组件。
+本阶段实际提供 `Prefabs/GameSystem/Prefab/GameManager.prefab`，两场景各实例化一次，序列化引用 DefaultGameConfig。其余 Prefab 由 Owner 按下表交付，当前不生成无行为空壳来假装完成，也不提前选择未确认的物理组件。
 
 |Prefab / 主维护者|建议职责组件（待实现）|复用时复位|
 |---|---|---|
@@ -207,12 +207,15 @@ Assets/
       UI/                       # Owner说明，后续正式界面
       GameSystem/
         Configuration/          # SO类型与WaveDefinition
+        EnemyWiring/            # 和Enemy模块接线相关
+        Spawn/                  # 波次流程相关
         GameManager.cs
         DevelopmentLauncher.cs
         PrefabPool.cs
     Data/                       # 8份SO资产，按类型命名
     Prefabs/
-      GameSystem/               # GameManager.prefab
+      GameSystem/
+        Prefab/                 # GameManager.prefab等
     Scenes/                     # MainMenu.unity、Game.unity
     Art/                        # 资源约定，不引入P1美术
     Editor/                     # 一次性搭建、验证和构建工具

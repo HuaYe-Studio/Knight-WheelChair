@@ -9,6 +9,7 @@ namespace KWC.GameSystem
     public sealed class PrefabPool : MonoBehaviour, IObjectPool
     {
         [SerializeField] private GameObject prefab;
+        public GameObject Prefab => prefab;
 
         private readonly Queue<GameObject> available = new Queue<GameObject>();
         private readonly HashSet<GameObject> borrowed = new HashSet<GameObject>();

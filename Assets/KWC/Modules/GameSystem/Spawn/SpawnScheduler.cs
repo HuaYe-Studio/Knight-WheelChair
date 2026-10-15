@@ -52,9 +52,17 @@ namespace KWC.GameSystem
 
         public void InitializeWave()
         {
+            #region 引用守卫
+
             if (waveSetConfig == null)
             {
                 Debug.LogError("assign the Waves config before starting a wave.", this);
+                return;
+            }
+
+            if (enemy1Config == null)
+            {
+                Debug.LogError("assign the E1 config before starting a wave.", this);
                 return;
             }
 
@@ -64,11 +72,68 @@ namespace KWC.GameSystem
                 return;
             }
 
+            if (warningPool.Prefab == null)
+            {
+                Debug.LogError("assign the prefab in warning pool before starting a wave.", this);
+                return;
+            }
+
             if (enemyPool == null)
             {
                 Debug.LogError("assign the enemy pool before starting a wave.", this);
                 return;
             }
+
+            if (enemyPool.Prefab == null)
+            {
+                Debug.LogError("assign the prefab in enemy pool before starting a wave.", this);
+                return;
+            }
+
+            if (playerContext == null)
+            {
+                Debug.LogError("assign the player context before starting a wave.", this);
+                return;
+            }
+
+            #endregion
+
+            #region 组件守卫
+
+            GameObject enemy = enemyPool.Prefab;
+
+            if (!enemy.TryGetComponent<Enemy1Controller>(out _))
+            {
+                Debug.LogError("need Enemy1Controller component before starting a wave.", this);
+                return;
+            }
+
+            if (!enemy.TryGetComponent<SimpleMovementHandler>(out _))
+            {
+                Debug.LogError("need SimpleMovementHandler component before starting a wave.", this);
+                return;
+            }
+
+            if (!enemy.TryGetComponent<PhysicsContactSource>(out _))
+            {
+                Debug.LogError("need PhysicsContactSource component before starting a wave.", this);
+                return;
+            }
+
+            if (!enemy.TryGetComponent<LogOnlyCombatBridge>(out _))
+            {
+                Debug.LogError("need LogOnlyCombat component before starting a wave.", this);
+                return;
+            }
+
+            GameObject warning = warningPool.Prefab;
+            if (!warning.TryGetComponent<SpawnWarning>(out _))
+            {
+                Debug.LogError("need SpawnWarning component before starting a wave.", this);
+                return;
+            }
+
+            #endregion
 
             if (!isInWave)
             {
@@ -157,15 +222,25 @@ namespace KWC.GameSystem
                                 return;
                             Debug.Log("Spawn warning Done,enemy is coming!");
 
-                            GameObject enemy = enemyPool.Rent(go.transform.position, go.transform.rotation, InitializeEnemy1);
+                            GameObject enemy = null;
+
+                            try
+                            {
+                                enemy = enemyPool.Rent(go.transform.position, go.transform.rotation, InitializeEnemy1);
+                            }
+                            finally
+                            {
+                                warningPool.Return(go);
+                                livedSpawnWarnings.Remove(spawnWarning);
+                            }
+
                             livedEnemy.Add(enemy);
                             generatedEnemy++;
                             if (generatedEnemy == spawnCount)
                             {
                                 Debug.Log("Enemy Totally generated!");
                             }
-                            warningPool.Return(go);
-                            livedSpawnWarnings.Remove(spawnWarning);
+
                         });
                     });
                 }
@@ -178,9 +253,13 @@ namespace KWC.GameSystem
                 return;
 
             ClearSpawnState();
-            WaveEnded?.Invoke();
-            Debug.Log($"Wave{waveIndex} Finished!");
+            int endWaveIndex = waveIndex;
+
             waveIndex++;
+
+            WaveEnded?.Invoke();
+            Debug.Log($"Wave{endWaveIndex} Finished!");
+
         }
 
         public void StopWave()
@@ -200,9 +279,10 @@ namespace KWC.GameSystem
             return new Vector3(x, 0f, z);
         }
 
+        //占位暂时不改动运行状态，将来与 isInWave / waveTimer=Infinity 一起提交
         private void EnterBossWave()
         {
-            isInBossWave = true;
+            //isInBossWave = true;
 
             //此处逻辑暂未完善
             // generatedEnemy = 0;
@@ -224,17 +304,43 @@ namespace KWC.GameSystem
 
             GameObject enemy = livedEnemy[0];
             var controller = enemy.GetComponent<Enemy1Controller>();
-            controller.ReportEnemyDied(controller.LifeId);
-            RecycleEnemy(enemy);
+            int lifeId = controller.LifeId;
+            controller.ReportEnemyDied(lifeId);
+
+            RecycleEnemy(enemy, lifeId);
         }
 
-        //处理敌人死亡
-        public void RecycleEnemy(GameObject enemy)
+        //测试
+        public void TestRecycle()
         {
-            if (!livedEnemy.Remove(enemy))
+            if (livedEnemy.Count == 0)
                 return;
 
+            GameObject enemy = livedEnemy[0];
+            var controller = enemy.GetComponent<Enemy1Controller>();
+            int testRecycleLifeId = controller.LifeId - 1;
+            int countBefore = livedEnemy.Count;
+
+            bool accepted = RecycleEnemy(enemy, testRecycleLifeId);
+            bool pass = !accepted && livedEnemy.Count == countBefore && enemy.activeSelf;
+            Debug.Log($"迟到回收测试：testRecycleLifeId={testRecycleLifeId}，当前 lifeId={controller.LifeId}，accepted={accepted}（应为 false）；"+
+                      $"{(pass ? "Success" : "Fail")}");
+        }
+        //处理敌人死亡
+        public bool RecycleEnemy(GameObject enemy,int lifeId)
+        {
+            int id = enemy.GetComponent<Enemy1Controller>().LifeId;
+            if (id != lifeId)
+            {
+                Debug.LogWarning("回收时出现life id错误");
+                return false;
+            }
+
+            if (!livedEnemy.Remove(enemy))
+                return false;
+
             EnemyReset(enemy);
+            return true;
         }
 
         private void EnemyReset(GameObject enemy)

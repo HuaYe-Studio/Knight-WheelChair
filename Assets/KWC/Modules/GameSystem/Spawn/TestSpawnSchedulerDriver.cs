@@ -52,7 +52,11 @@ namespace KWC.GameSystem
                         spawnScheduler.TestKillOneEnemy();
                     }
                 }
+            }
 
+            if (Keyboard.current.f5Key.wasPressedThisFrame)
+            {
+                spawnScheduler.TestRecycle();
             }
         }
 
