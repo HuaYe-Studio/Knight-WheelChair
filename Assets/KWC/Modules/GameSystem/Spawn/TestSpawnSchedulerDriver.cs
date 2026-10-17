@@ -8,6 +8,7 @@ namespace KWC.GameSystem
         [SerializeField] private SpawnScheduler spawnScheduler;
         [SerializeField] private PrefabPool warningPool;
         [SerializeField] private int testFrameRate = 0;
+        [SerializeField] private bool wantKillAllEnemies = false;
 
         private void Start()
         {
@@ -36,6 +37,26 @@ namespace KWC.GameSystem
             if (Keyboard.current.f3Key.wasPressedThisFrame)
             {
                 TestPr2();
+            }
+
+            if (Keyboard.current.f4Key.wasPressedThisFrame)
+            {
+                if (!wantKillAllEnemies)
+                {
+                    spawnScheduler.TestKillOneEnemy();
+                }
+                else
+                {
+                    while(spawnScheduler.GetLivedEnemyCount() > 0)
+                    {
+                        spawnScheduler.TestKillOneEnemy();
+                    }
+                }
+            }
+
+            if (Keyboard.current.f5Key.wasPressedThisFrame)
+            {
+                spawnScheduler.TestRecycle();
             }
         }
 

@@ -69,7 +69,8 @@ git switch -c feature/player-movement
     Core/                     GameState、AttributeType、3个公共接口
     Modules/                  Map / Player / Enemy / Combat / UI / GameSystem
     Data/                     8份ScriptableObject资产
-    Prefabs/GameSystem/       GameManager.prefab
+    Prefabs/GameSystem/
+      Prefab/                 GameManager.prefab等
     Scenes/                   MainMenu.unity、Game.unity
     Art/                      资源组织说明
     Editor/                   初始化工具与骨架集成验证工具
