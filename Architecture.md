@@ -71,7 +71,7 @@ flowchart TD
 |Player Attack|Combat 玩家属性|Weapon、UI|
 |Player Movement|Combat 玩家属性|Player 读最新速度；输入方向/移动执行仍归 Player|
 |Attack Speed / Attack Interval|Combat 玩家属性 / 推导|间隔按 `100 / Attack Speed` 推导，不另存一份独立可改值|
-|EXP / Player Level|Combat 成长|UI；初始等级和经验结转尚未确认|
+|EXP / Player Level|Combat 成长|UI；保留超额经验，允许连续升级；初始等级仍由流程层显式传入|
 |Growth Points|Combat 成长|UI 提请求；未花点保留|
 |Attribute Rank|Combat 成长|四项各自等级，与玩家等级分开；不设 20 级上限|
 |Enemy HP / Boss HP|各实体的 Combat Health 组件|Enemy 订阅 Dead，UI 读 Boss HP，流程收死亡结果|
@@ -186,12 +186,12 @@ Input System 的启用方式参见 [官方安装说明](https://docs.unity3d.com
 |通信|所有者|建议使用方式|
 |---|---|---|
 |GameStateChanged|GameManager|已实现实例 event，携带新状态；界面/控制响应|
-|HPChanged / EXPChanged / LevelUp|Combat|Owner 后续定义实例 event；UI 先读快照再响应|
+|HealthChanged / ExperienceChanged / LevelUp|Combat|实例event；UI读取快照后响应变化。经验结算完成后通知，LevelUp每次结算最多一次并携带最终等级|
 |EnemyDied / PlayerDied / BossDied|Combat（生命事实）|流程订阅并明确处理顺序；Enemy 响应状态，禁止重复死亡通知|
 |WaveChanged / WaveEnded|Game System 波次|UI 读取进度；波末协调清理/补满/升级|
 |购买属性 / 伤害 / 初始化 / 池申请|对应状态所有者|明确方法调用并返回结果；不是“一切广播”|
 
-除 GameStateChanged 外，上表事件尚未创建，签名在实际接入时由主程和 Owner 审核。只读接口不是可写状态副本，UI 不缓存一套成长点去自行结算。
+GameStateChanged以及Combat的HealthChanged、ExperienceChanged、LevelUp已创建；其余入口以对应模块当前实现为准，跨模块接线时由主程和Owner审核。IPlayerStats包含Exp和ExpToNextLevel只读属性，后者表示当前级升到下一级的完整门槛。只读接口不是可写状态副本，UI不缓存一套成长点去自行结算。
 
 ## 12. 实际目录
 
