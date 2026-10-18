@@ -61,8 +61,7 @@ namespace KWC.Combat
         /// </summary>
         public bool TryDrop(int expectedLifeId)
         {
-            if (!initialized || dropped || isBoss || enemyHealth == null ||
-                !enemyHealth.IsDead || lifeId != expectedLifeId || enemyHealth.LifeId != expectedLifeId)
+            if (dropped || isBoss || !IsCurrentDeath(enemyHealth, expectedLifeId))
                 return false;
 
             // 先记下已经处理，再申请对象，防止生成过程中的回调重复触发掉落。
@@ -77,22 +76,39 @@ namespace KWC.Combat
             // 本轮使用死亡位置，不额外规定随机散落半径或运动表现。
             for (int i = 0; i < count; i++)
             {
-                expOrbPool.Rent(position, Quaternion.identity, instance =>
-                    instance.GetComponent<ExpOrb>().Initialize(expOrbPool, expPerOrb));
+                expOrbPool.Rent(position, Quaternion.identity, InitializeExpOrb);
 
                 // Rent会激活掉落物并执行回调；若期间清场或复用了敌人，停止旧生命剩余的掉落。
-                if (!initialized || enemyHealth != health || health == null || !health.IsDead ||
-                    lifeId != expectedLifeId || health.LifeId != expectedLifeId)
+                if (!IsCurrentDeath(health, expectedLifeId))
                     return true;
             }
 
             // 血包独立判定，不会替换或减少经验球。
             if (dropHealthPack)
             {
-                healthPackPool.Rent(position, Quaternion.identity, instance =>
-                    instance.GetComponent<HealthPack>().Initialize(healthPackPool, healthPackHealRatio));
+                healthPackPool.Rent(position, Quaternion.identity, InitializeHealthPack);
             }
             return true;
+        }
+
+        // 检查这次死亡是否仍有效：没有清场，也没有换成另一对象或下一条命。
+        private bool IsCurrentDeath(Health health, int expectedLifeId)
+        {
+            return initialized && health != null && enemyHealth == health && health.IsDead &&
+                lifeId == expectedLifeId && health.LifeId == expectedLifeId;
+        }
+
+        // 把方法传给 Rent，池会在启用物品前调用它，为这次生成填入奖励。
+        private void InitializeExpOrb(GameObject instance)
+        {
+            ExpOrb orb = instance.GetComponent<ExpOrb>();
+            orb.Initialize(expOrbPool, expPerOrb);
+        }
+
+        private void InitializeHealthPack(GameObject instance)
+        {
+            HealthPack pack = instance.GetComponent<HealthPack>();
+            pack.Initialize(healthPackPool, healthPackHealRatio);
         }
 
         // 非击杀清理只使当前掉落入口失效，不生成奖励。

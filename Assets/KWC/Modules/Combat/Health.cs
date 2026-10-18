@@ -66,18 +66,15 @@ namespace KWC.Combat
                 return false;
 
             // 超量伤害最多扣到零；过小的浮点数也可能因精度限制而没有实际改变血量。
-            float nextHp = Math.Max(0f, currentHp - amount);
+            float nextHp = Mathf.Max(0f, currentHp - amount);
             if (nextHp == currentHp) return false;
             // 先写入状态再通知：若监听者再次调用伤害方法，零血量会阻止重复结算死亡。
             currentHp = nextHp;
-            bool died = nextHp == 0f;
-            float maximum = maxHp;
-            // ?.Invoke 表示有订阅者时才调用。事件同步执行，监听者应避免抛出异常，
-            // 否则会中断后续通知；需要死亡结算的监听者也不应在此提前回收对象。
-            HealthChanged?.Invoke(expectedLifeId, nextHp, maximum);
+            // ?.Invoke 表示有订阅者时才通知；参数是本次扣血后的值。
+            HealthChanged?.Invoke(expectedLifeId, nextHp, maxHp);
 
             // 血量监听者可能结束生命或重新初始化对象；再次核对编号，避免误报新生命死亡。
-            if (died && initialized && lifeId == expectedLifeId)
+            if (nextHp == 0f && initialized && lifeId == expectedLifeId)
                 Died?.Invoke(expectedLifeId);
             return true;
         }
@@ -91,8 +88,8 @@ namespace KWC.Combat
             if (!CanChange(expectedLifeId) || !CombatMath.IsFinite(amount) || amount <= 0f)
                 return false;
 
-            // 先用 double 相加再限制上限，避免两个较大 float 相加时先溢出（但一般生命值不会太大）。
-            float nextHp = (float)Math.Min(maxHp, (double)currentHp + amount);
+            // 治疗后的血量不能超过最大血量。
+            float nextHp = Mathf.Min(maxHp, currentHp + amount);
             if (nextHp == currentHp) return false;
             currentHp = nextHp;
             HealthChanged?.Invoke(expectedLifeId, nextHp, maxHp);

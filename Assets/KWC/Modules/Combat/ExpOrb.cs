@@ -35,14 +35,13 @@ namespace KWC.Combat
         /// </summary>
         public bool TryCollect(PlayerStats player, int expectedSpawnId)
         {
-            if (!available || spawnId != expectedSpawnId || player == null ||
-                !player.IsInitialized || player.CurrentHp <= 0f)
+            if (!available || spawnId != expectedSpawnId || player == null)
                 return false;
 
             // AddExperience会同步通知UI；提前标记，避免回调再次拾取同一颗经验球。
             available = false;
-            bool accepted = player.AddExperience(experience);
-            if (!accepted)
+            // 玩家能否获得经验由 AddExperience 判断；失败时把这颗球恢复为可拾取。
+            if (!player.AddExperience(experience))
             {
                 if (spawnId == expectedSpawnId) available = true;
                 return false;
