@@ -67,12 +67,60 @@ namespace KWC.Combat
         public event Action<int> LevelUp;
 
         // HP 读取 Health 的最新值，其余属性读取本组件维护的运行时状态。
-        public float CurrentHp { get { EnsureInitialized(); return health.CurrentHp; } }
-        public float MaxHp { get { EnsureInitialized(); return health.MaxHp; } }
-        public float PlayerAttack { get { EnsureInitialized(); return playerAttack; } }
-        public float PlayerMovement { get { EnsureInitialized(); return playerMovement; } }
-        public float AttackSpeed { get { EnsureInitialized(); return attackSpeed; } }
-        public int Exp { get { EnsureInitialized(); return exp; } }
+        public float CurrentHp
+        {
+            get
+            {
+                EnsureInitialized();
+                return health.CurrentHp;
+            }
+        }
+
+        public float MaxHp
+        {
+            get
+            {
+                EnsureInitialized();
+                return health.MaxHp;
+            }
+        }
+
+        public float PlayerAttack
+        {
+            get
+            {
+                EnsureInitialized();
+                return playerAttack;
+            }
+        }
+
+        public float PlayerMovement
+        {
+            get
+            {
+                EnsureInitialized();
+                return playerMovement;
+            }
+        }
+
+        public float AttackSpeed
+        {
+            get
+            {
+                EnsureInitialized();
+                return attackSpeed;
+            }
+        }
+
+        public int Exp
+        {
+            get
+            {
+                EnsureInitialized();
+                return exp;
+            }
+        }
+
         // 当前级升到下一级的完整门槛；例如Exp=5、门槛=40，经验条显示5/40。
         public int ExpToNextLevel
         {
@@ -82,8 +130,24 @@ namespace KWC.Combat
                 return CombatMath.GetRequiredExp(checked(playerLevel + 1), expA, expB, expC);
             }
         }
-        public int PlayerLevel { get { EnsureInitialized(); return playerLevel; } }
-        public int GrowthPoints { get { EnsureInitialized(); return growthPoints; } }
+        public int PlayerLevel
+        {
+            get
+            {
+                EnsureInitialized();
+                return playerLevel;
+            }
+        }
+
+        public int GrowthPoints
+        {
+            get
+            {
+                EnsureInitialized();
+                return growthPoints;
+            }
+        }
+
 
         /// <summary>
         /// 在玩家 Health 初始化后建立属性视图，属性购买次数从零开始。

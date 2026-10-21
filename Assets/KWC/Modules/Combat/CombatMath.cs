@@ -17,7 +17,7 @@ namespace KWC.Combat
         {
             if (!IsFinite(attackSpeed) || attackSpeed <= 0f)
                 throw new ArgumentOutOfRangeException(nameof(attackSpeed));
-            return (float)(100d / attackSpeed);
+            return 100f / attackSpeed;
         }
 
         /// <summary>

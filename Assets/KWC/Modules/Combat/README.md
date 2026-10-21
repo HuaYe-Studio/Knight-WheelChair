@@ -6,7 +6,24 @@
 
 公式/数值以项目根目录《数值设计》为准；属性无20级上限。死亡只通知一次，波末清理不产生击杀收益。经验保留超额部分并允许连续升级。掉血/购买HP变化的细节、初始等级与成长点、拾取距离、子弹参数、同时受击和取整仍需确认。
 
-## 第一轮：基础代码
+## 当前实现
+
+### 2026-10-18教学可读性整理
+
+Health使用Mathf.Min/Max表达血量上下限，去掉通知前多余的临时变量；PlayerStats的属性读取展开为分行步骤；ExpOrb把玩家是否能获得经验交给AddExperience统一判断；EnemyDrops用具名初始化方法传给对象池，并用IsCurrentDeath统一重复判断。公共方法、事件、初始化参数及结算规则保持不变。
+
+授课先读公式、扣血、经验while与购买switch，再讲事件，最后讲LifeId/SpawnId与回收。没有通过删除一次性结算保护或引入泛型框架来压缩行数。InitializeExpOrb/InitializeHealthPack作为方法参数传给Rent，由对象池在启用物品前调用；可先讲具名方法，再介绍等价的Lambda写法。
+
+本次整理后，在Unity 2022.3.62f3隔离工程以 `-batchmode -nographics -noUpm` 进入真实Play Mode，51项断言通过（`TEACHING_CHECKS_PASS=51`）。覆盖公式、血量上下限、一次性死亡、回调复用、连续升级、三项购买、重复/无效拾取、掉落与清场。使用当前Combat、Core、三份配置脚本与原有PrefabPool副本；已核对15份被测源码与工作区一致。此结果不代表完整工程、实际场景或物理拾取链路验收；临时验证工程已清理。
+
+提交PR前另以相同Unity版本和隔离方式检查本次交付的两个实际Prefab：14项资源加载、组件/网格/材质引用及保存重导入断言通过（`PREFAB_ASSET_PASS=14`），8项真实Play Mode断言通过（`PREFAB_PLAY_PASS=8`），包括从PrefabPool借出、奖励结算、重复/旧SpawnId拒绝、复用、清场和满血消费。资源保存仅在临时副本中执行，未回写原资产；未进行画面效果或物理拾取验收。此处是新增资源验证，前述51项代码回归沿用本次教学整理后的结果。
+
+### 交付资源与接线边界
+
+本模块保留Health、CombatMath、PlayerStats、EnemyDrops、ExpOrb、HealthPack，以及 `Assets/KWC/Prefabs/Combat` 的经验球/血包Prefab与占位材质。Prefab根节点分别挂ExpOrb、HealthPack，没有Collider、自动拾取或吸附；由GameSystem提供两个独立对象池并调用现有初始化入口。
+
+当前测试场景仍运行GameSystem原有测试逻辑，F4不代表本模块真实Health/掉落链路。波末回血、进入Upgrade、阶段购买开关、敌人/Boss生命初始化和回收编排需由GameSystem/Enemy Owner接入。Combat已提供TryHeal、SetPurchasingEnabled、HealthChanged/Died和掉落/拾取结算入口，不再接管流程。
+
 
 - `Health`：当前/最大 HP 的唯一维护者，提供伤害、治疗、生命结束与一次性死亡通知。它是通用生命结算组件，玩家的0.5秒无敌、阵营/有效命中判定由下一轮伤害流程接入。
 - `PlayerStats`：实现 `IPlayerStats`，维护玩家运行时属性、经验、等级、成长点和三项属性阶数。HP直接读取对应 `Health`；攻击力、移动速度、攻速从 `PlayerBaseConfig` 初始化，购买后使用成长配置重算，不修改配置资产。经验增加、连续升级和成长点发放也由本组件统一完成。
@@ -14,7 +31,7 @@
 - `EnemyDrops`：对普通敌人的一次有效死亡申请经验球和血包，使用外部提供的两个 `IObjectPool`；掉落与回收的顺序由流程层控制。
 - `ExpOrb` / `HealthPack`：处理一次拾取的经验或治疗结算，并归还所属对象池。外部确认拾取条件后调用，不内置距离检测。
 
-已支持经验升级、攻击/移动/攻速三项属性购买，以及普通敌人掉落和两种拾取物的内部结算；`GetAttributeRank` 返回实际阶数，HP暂时返回0。武器、子弹、靠近拾取检测和HP购买尚未实现；本轮未制作Prefab或接通场景。
+已支持经验升级、攻击/移动/攻速三项属性购买，以及普通敌人掉落和两种拾取物的内部结算；`GetAttributeRank` 返回实际阶数，HP暂时返回0。武器、子弹、靠近拾取检测和HP购买尚未实现；经验球与血包Prefab已交付；场景和池接线由GameSystem负责。
 
 ### 初始化与生命周期
 
@@ -116,7 +133,7 @@ bool usedPack = healthPack.TryCollect(playerHealth, packId);
 
 拾取组件先锁定本次消费，再同步修改玩家状态并通知监听者，最后归还池；重复请求不会再次发奖。每次Initialize递增SpawnId，旧请求不能消费复用后的对象。监听者仍遵守前述通知约定，不能抛异常中断结算链路。池/Prefab配置错误会直接报错，应修正配置，不要在同一死亡中反复重试掉落。
 
-波末调用各PrefabPool的 `ReturnAll()`，不要调用TryDrop或TryCollect模拟清理；OnDisable只使入口失效，不增加经验、不治疗、不产生掉落。真正的拾取距离检测、玩家引用与阶段许可、两个Prefab和池引用、死亡及波末流程接线还需要联调。
+波末调用各PrefabPool的 `ReturnAll()`，不要调用TryDrop或TryCollect模拟清理；OnDisable只使入口失效，不增加经验、不治疗、不产生掉落。两个掉落Prefab已交付；拾取距离检测、玩家引用与阶段许可、池引用、死亡及波末流程接线仍待对应Owner联调。
 
 ### 校验范围与接线状态
 
@@ -137,6 +154,8 @@ bool usedPack = healthPack.TryCollect(playerHealth, packId);
 Enemy的 `ICombatBridge` 仍为待Review提案，本轮没有修改其接口或接通真实战斗。后续先确认玩家无敌计时、多来源受伤、购买HP变化及拾取距离，再接入相应玩法。
 
 ### Reviewer最小复现步骤
+
+先检查 `Assets/KWC/Prefabs/Combat/ExpOrb.prefab` 与 `HealthPack.prefab`：根节点各有对应脚本、MeshFilter和MeshRenderer，网格与材质引用有效，没有Collider；在临时副本上保存并Reimport后应无Missing Script。测试池的Prefab字段分别指定这两个资源，Rent时先Initialize，再调用TryCollect；经验球增加配置中的经验后回收，血包按最大HP比例治疗，满血也消费，ReturnAll不产生奖励。可按下方示例配置PrefabPool，把示例的临时template替换为实际Prefab引用，并删去对该资源的SetActive、AddComponent和Destroy操作。
 
 以下示例只在空的临时场景验证模块与真实PrefabPool，不接管Game/MainMenu。把代码临时保存为 `Assets/Editor/CombatReviewExample.cs`（已有Editor目录则直接使用），进入空场景的Play Mode，再执行菜单 `KWC/Combat/Review Example`。成功打印 `COMBAT_EXAMPLE_PASS`；失败直接抛异常。运行后删除临时脚本及其meta，不提交测试产物。
 
