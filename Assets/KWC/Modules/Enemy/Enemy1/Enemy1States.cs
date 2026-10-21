@@ -74,9 +74,16 @@ namespace KWC.Enemy
     // 表 N03 给出 E1 Attack Interval = 100 / E1 Attack Speed 作为「持续接触」的节奏，
     // 所以首击立即、后续按该间隔。
     //
-    // 待确认（Architecture 第 5 节「持续接触节奏/重接触重置待确认」）：离开接触时是停止计时还是清零、
-    // 重新贴上是否再给一次首击。当前取保守读法：离开接触只停止计时、不清零。它既不白送一次重置，
-    // 也不会让计时器在暗处继续跑。规则定下来后，改 OnEnter / OnExit 各一行即可。
+    // 已选定的语义（与实现一致，勿再按旧注释理解）：
+    //   **每次重新接触都立即打一次。** OnEnter 里会 _throttle.Reset()（回到「就绪」），
+    //   紧接着 TryStrike() 提交首击。因此「贴上 → 离开 → 再贴上」会给一次新的首击，
+    //   而不是沿用上一次的冷却残留。
+    //   这是 Architecture 第 5 节「首次有效接触立即提交首击」的直接延伸：
+    //   「重新接触」被当作一次新的有效接触。
+    //
+    // 仍待确认（Architecture 第 5 节「持续接触节奏/重接触重置待确认」）：
+    //   若策划希望「离开接触不清零、重新贴上不白送一次攻击」，则删除 OnEnter 里的
+    //   _throttle.Reset() 即可（一行），此时节流器会保留上次的冷却进度。
     // --------------------------------------------------------------------------------------------
     public sealed class Enemy1ContactAttackState : StateBase<Enemy1StateId>
     {
@@ -99,6 +106,9 @@ namespace KWC.Enemy
             // 自己的状态数据在自己这里复位，绝不在构造函数里：
             // 池化实例会重新进入本状态，不能继承上一个使用者的阶段。
             _struckThisEntry = false;
+
+            // 回到「就绪」：重新接触视为一次新的有效接触，因此紧接着的首击立即生效。
+            // 这条是已选定的语义（见类注释）；若要改成「不白送重置」，删掉这一行即可。
             _throttle.Reset();
 
             if (_brain.StopWhileAttacking)
@@ -134,8 +144,9 @@ namespace KWC.Enemy
 
         public override void OnExit(IStateMachineHost<Enemy1StateId> host)
         {
-            // 刻意不在这里 _throttle.Reset()：见类注释。
-            // 只有进入本状态才重置，所以重新进入拿不到一次免费的攻击间隔。
+            // 这里不碰节流器：离开接触时只停止计时（Tick 只在 OnUpdate 里被调用），
+            // 但不清零也不重置 —— 重置只发生在 OnEnter，语义是「新的接触开始了」。
+            // 两个位置各管一件事，改语义时只需动 OnEnter 那一行（见类注释）。
         }
 
         public bool HasStruckThisEntry => _struckThisEntry;

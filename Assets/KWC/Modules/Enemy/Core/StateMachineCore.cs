@@ -90,6 +90,21 @@ namespace KWC.Enemy
         }
     }
 
+    // 打断队列的一项：目标状态 + 触发原因，必须成对入队、成对出队。
+    // 单独定义一个类型而不是两个并行字段，是为了让「两者不能拆开」在类型上说清楚：
+    // 原因不再有「最后一个覆盖前面」的可能。
+    public readonly struct InterruptRequest<TStateId> where TStateId : struct
+    {
+        public readonly TStateId Target;
+        public readonly string Reason;
+
+        public InterruptRequest(TStateId target, string reason)
+        {
+            Target = target;
+            Reason = reason;
+        }
+    }
+
     // --------------------------------------------------------------------------------------------
     // 状态机本体。它只拥有三样东西：当前是哪个状态、当前状态待了多久、上一次转移是什么时候。
     // 它不拥有任何游戏数据。
@@ -117,7 +132,12 @@ namespace KWC.Enemy
         private readonly List<TransitionRule<TStateId>> _rules = new List<TransitionRule<TStateId>>();
 
         // 打断用队列而不是单个槽位：同一帧到达两次事件不许被悄悄合并，第二个也不能被第一个顶掉。
-        private readonly Queue<TStateId> _interrupts = new Queue<TStateId>();
+        //
+        // 队列项必须把 target 和 reason 绑在一起。之前 _interrupts 只存 target，原因放在单个
+        // _pendingReason 字段里，同一帧连续两个打断时，先出队的事件会拿到后一个事件的原因
+        // （串台），与「事件不会被合并/覆盖」的承诺不符。
+        private readonly Queue<InterruptRequest<TStateId>> _interrupts =
+            new Queue<InterruptRequest<TStateId>>();
 
         private readonly Dictionary<TStateId, float> _totalTime = new Dictionary<TStateId, float>();
         private readonly Dictionary<TStateId, int> _enters = new Dictionary<TStateId, int>();
@@ -134,6 +154,9 @@ namespace KWC.Enemy
         // 包括事件打断。之前漏了这条，实测出现 Dead → ContactAttack → Dead 的往返，
         // 于是「一次死亡」把死亡通知发了两次。
         private bool _isInTerminalState;
+
+        // 已被 Shutdown：只做过 OnExit，没有活动状态。此时不推进、不接受转移。
+        private bool _stopped;
 
         private float _timeInState;
         private bool _hasTransited;
@@ -234,6 +257,7 @@ namespace KWC.Enemy
 
             _initial = initial;
             _initialized = true;
+            _stopped = false;
 
             // 初始进入不算一次转移：不需要为「从无到初始状态」写一条边。
             _liveStateCount = 0;
@@ -245,7 +269,7 @@ namespace KWC.Enemy
         // 动画事件或另一个状态里调用 —— 这样「什么时候允许转移」只有一个答案。
         public void Update(float deltaTime)
         {
-            if (!_initialized || deltaTime < 0f)
+            if (!_initialized || _stopped || deltaTime < 0f)
             {
                 return;
             }
@@ -254,20 +278,22 @@ namespace KWC.Enemy
             _totalTime[_current] += deltaTime;
 
             // 1. 事件打断优先。死亡这类信号比任何普通边都高，且不受滞回门槛限制。
+            //    原因随事件一起出队，不会被后一个打断覆盖。
             if (_interrupts.Count > 0)
             {
-                TStateId target = _interrupts.Dequeue();
-                SafeTransition(target, "事件打断");
+                InterruptRequest<TStateId> request = _interrupts.Dequeue();
+                SafeTransition(request.Target, request.Reason);
                 return;
             }
 
             // 2. 滞回：合法转移被延后，但绝不会被丢掉，等门槛开了就执行。
+            //    这一步必须排在「处理排队请求」之前，否则刚进入状态时排下的请求会绕过滞回。
             if (_hasTransited && _timeInState < MinDwell)
             {
                 return;
             }
 
-            // 3. 处理 OnEnter 期间排队的请求。普通请求同样受滞回门槛约束。
+            // 3. 处理 OnEnter 期间排队的请求（普通请求，受上面的滞回门槛约束）。
             if (_next.HasValue)
             {
                 TStateId target = _next.Value;
@@ -298,7 +324,7 @@ namespace KWC.Enemy
         // 从 OnEnter、事件回调、物理回调里调用都是安全的。
         public void OnHostileInterrupt(TStateId target, string reason)
         {
-            if (!_initialized)
+            if (!_initialized || _stopped)
             {
                 return;
             }
@@ -314,6 +340,15 @@ namespace KWC.Enemy
                 return;
             }
 
+            // 目标状态必须已注册。放在入队前检查而不是等出队时才去 GotoState 里索引，
+            // 是为了让错误的调用点在抛异常时就已经被指出，而不是在一帧之后的转移阶段。
+            if (!_states.ContainsKey(target))
+            {
+                Debug.LogError("[FSM] OnHostileInterrupt 收到了未注册的状态 '" + target +
+                               "'，已拒绝。这属于接线错误。");
+                return;
+            }
+
             // 已经在目标状态里了：这不是失败，所以既不计数也不报错。
             // 迟到的死亡回调重复上报会走到这里。
             if (target.Equals(_current) && _interrupts.Count == 0)
@@ -322,14 +357,15 @@ namespace KWC.Enemy
                 return;
             }
 
-            _interrupts.Enqueue(target);
-            _pendingReason = string.IsNullOrEmpty(reason) ? "事件打断" : reason;
+            // target 与 reason 一起入队：同一帧的多个打断各自保留自己的原因。
+            _interrupts.Enqueue(new InterruptRequest<TStateId>(
+                target, string.IsNullOrEmpty(reason) ? "事件打断" : reason));
         }
 
         // 状态请求转移的通道。故意叫 Try：调用方必须看返回值，每次拒绝都会计数并报警。
         public bool TryRequestTransition(TStateId next, string reason)
         {
-            if (!_initialized)
+            if (!_initialized || _stopped)
             {
                 return false;
             }
@@ -369,6 +405,40 @@ namespace KWC.Enemy
 
         // 当前状态是不是终态。调试面板与测试会读它。
         public bool IsInTerminalState => _isInTerminalState;
+
+        // 最近一次实际执行的转移（来自哪、去往哪、原因）。从转移日志里倒查，供调试与断言使用。
+        public bool TryGetLastTransition(out string from, out string to, out string reason)
+        {
+            for (int i = _log.Count - 1; i >= 0; i--)
+            {
+                string line = _log[i];
+                if (!line.StartsWith("转移 ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // 日志格式：转移 A -> B  在 0.123s 之后（原因）
+                int arrow = line.IndexOf(" -> ", StringComparison.Ordinal);
+                int period = line.IndexOf("  在 ", StringComparison.Ordinal);
+                int openParen = line.LastIndexOf('（');
+                int closeParen = line.LastIndexOf('）');
+
+                if (arrow < 0 || period < 0 || openParen < 0 || closeParen < 0)
+                {
+                    break;
+                }
+
+                from = line.Substring(3, arrow - 3).Trim();
+                to = line.Substring(arrow + 4, period - arrow - 4).Trim();
+                reason = line.Substring(openParen + 1, closeParen - openParen - 1);
+                return true;
+            }
+
+            from = null;
+            to = null;
+            reason = null;
+            return false;
+        }
 
         // 给人看的状态名，供调试面板和转移日志使用。只在显示或报警时调用，不在热路径上。
         public bool TryGetDisplayName(TStateId id, out string displayName)
@@ -417,11 +487,17 @@ namespace KWC.Enemy
             return false;
         }
 
-        // 强制离开：波末回收、重开、场景卸载、OnDisable 走这条路。
-        // 仍然执行 OnExit，保证申请与释放依旧配平，然后把状态机停在初始状态。
-        public void ResetToInitial(string reason)
+        // 只收尾，不再进入任何状态。
+        //
+        // 用途：对象被禁用 / 销毁 / 池化归还时调用。此时不该再重新进入初始状态 ——
+        // 那会让 LiveStateCount 停在 1（不是「收平到 0」），而且初始状态的 OnEnter 会
+        // 在「已经禁用」的对象上重新申请资源（订阅、协程、表现物），这正是资源泄漏的经典成因。
+        //
+        // 调用后状态机进入已停止状态：Update 不再推进，任何转移请求都被拒绝，
+        // 直到再次 Initialize（池化复用时走这条路）。
+        public void Shutdown(string reason)
         {
-            if (!_initialized)
+            if (!_initialized || _stopped)
             {
                 return;
             }
@@ -431,10 +507,33 @@ namespace KWC.Enemy
 
             if (_liveStateCount > 0)
             {
+                AddTrace("关闭 " + _current + " <- " + reason);
                 _states[_current].OnExit(this);
                 _liveStateCount--;
             }
 
+            _stopped = true;
+            _hasTransited = false;
+            _timeInState = 0f;
+        }
+
+        // 是否已被 Shutdown（只执行了 OnExit，没有新的 OnEnter）。
+        public bool IsStopped => _stopped;
+
+        // 强制离开并回到初始状态：波末回收、重开走这条路。
+        // 与 Shutdown 的区别是它会在初始状态上重新 OnEnter，所以只适用于「马上要重新开始」的场合。
+        public void ResetToInitial(string reason)
+        {
+            if (!_initialized)
+            {
+                return;
+            }
+
+            // 先按 Shutdown 的语义收尾（只 OnExit，不重复 OnEnter），再显式进入初始状态。
+            // 这样 OnEnter / OnExit 依然严格配平。
+            Shutdown(reason);
+
+            _stopped = false;
             _hasTransited = false;
             _timeInState = 0f;
             Enter(_initial, reason);
@@ -549,6 +648,12 @@ namespace KWC.Enemy
             return false;
         }
 
+        // 真正执行转移。所有路径（事件打断 / 排队请求）都必须经过这里，因此校验也在这里，
+        // 而不是只写在调用点上。
+        //
+        // 之前这里直接 Exit / Enter，注释却写着「打断和排队请求一样要过校验」——注释与实现不符。
+        // 一旦有人把未注册或非法的目标传进 OnHostileInterrupt，就会在 _states[id] 处抛
+        // KeyNotFound，而且是在一帧之后的转移阶段，很难定位。
         private void SafeTransition(TStateId target, string reason)
         {
             if (target.Equals(_current))
@@ -557,8 +662,23 @@ namespace KWC.Enemy
                 return;
             }
 
-            // 打断和排队请求一样要过校验，保证转移表始终是权威。
+            // 目标必须是已注册状态。未注册说明是接线或调用错误，拒绝并报错，绝不索引不存在的键。
+            if (!_states.ContainsKey(target))
+            {
+                Debug.LogError("[FSM] 拒绝转入未注册的状态 '" + target + "'（原因：" + reason +
+                               "）。当前状态为 '" + _current + "'。");
+                return;
+            }
+
+            // 事件打断不受滞回门槛约束，但同样必须走 declare 过的边，
+            // 否则转移表就不再是权威，状态图与代码会悄悄脱节。
             TStateId from = _current;
+            if (!IsLegal(from, target))
+            {
+                LogRefusal(target, "非法转移 " + from + " -> " + target + "（" + reason + "）");
+                return;
+            }
+
             Exit(from);
             Enter(target, reason);
             _hasTransited = true;
@@ -568,11 +688,13 @@ namespace KWC.Enemy
             Transitioned?.Invoke(from, target, reason);
         }
 
+        // 拒绝计数按「当前状态」记，而不是按目标状态记：
+        // 是「我（当前状态）被拦住了」，记到目标状态身上会让审计数字失去意义。
         private void LogRefusal(TStateId target, string message)
         {
-            if (_refusals.ContainsKey(target))
+            if (_refusals.ContainsKey(_current))
             {
-                _refusals[target]++;
+                _refusals[_current]++;
             }
 
             if (_timeInState >= StuckRequestWarnAfter)

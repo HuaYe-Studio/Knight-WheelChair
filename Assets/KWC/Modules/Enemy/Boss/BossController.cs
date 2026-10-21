@@ -253,12 +253,14 @@ namespace KWC.Enemy
 
         private void OnDisable()
         {
+            // 与 Enemy1 相同：禁用时只收尾（只 OnExit），不重新进入初始状态。
+            // 理由见 Enemy1Controller.OnDisable 的注释。
             if (!_isInitialized || _machine == null)
             {
                 return;
             }
 
-            _machine.ResetToInitial("已禁用");
+            _machine.Shutdown("已禁用");
             _decisionAccumulator = 0f;
         }
 

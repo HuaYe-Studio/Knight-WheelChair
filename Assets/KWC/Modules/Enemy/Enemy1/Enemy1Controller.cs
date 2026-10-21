@@ -222,14 +222,17 @@ namespace KWC.Enemy
 
         private void OnDisable()
         {
-            // 池化：关掉实例时把状态对收平，让活跃状态计数回到零，
-            // 并丢掉半格决策时间，避免被回收的实例把这段时间带进下一条命。
+            // 池化：对象被禁用时只做收尾 —— 执行当前状态的 OnExit，把活跃状态数收平到 0。
+            //
+            // 这里**不能**用 ResetToInitial：那个方法的语义是「退出当前状态后进入初始状态」，
+            // 禁用后再进一次初始状态会让 LiveStateCount 停在 1，而且初始状态的 OnEnter 会
+            // 在一个已经禁用的对象上重新申请资源（订阅、协程、表现物）—— 资源泄漏的经典成因。
             if (!_isInitialized || _machine == null)
             {
                 return;
             }
 
-            _machine.ResetToInitial("已禁用");
+            _machine.Shutdown("已禁用");
             _decisionAccumulator = 0f;
         }
 

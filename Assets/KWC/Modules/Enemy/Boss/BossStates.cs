@@ -415,6 +415,14 @@ namespace KWC.Enemy
                 return;
             }
 
+            // 玩家在冲刺途中可能消失（被池化回收、被 Destroy、场景切换）。
+            // 这种情况下 PlayerPosition 不可读（IPlayerContext 的 Transform 已失效），
+            // 所以必须先判存在：冲刺本身可以继续跑到终点，但不再判定命中。
+            if (!_brain.HasPlayer)
+            {
+                return;
+            }
+
             // 玩家是移动目标，所以按「刚走过的那一段」算接近程度，而不是只算当前点。
             float distanceToSegment = DistancePointToSegment(_brain.PlayerPosition, from, to);
             if (distanceToSegment > _hitRadius)
