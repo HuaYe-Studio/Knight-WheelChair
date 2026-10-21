@@ -47,10 +47,7 @@ namespace KWC.GameSystem
                 }
                 else
                 {
-                    while(spawnScheduler.GetLivedEnemyCount() > 0)
-                    {
-                        spawnScheduler.TestKillOneEnemy();
-                    }
+                    spawnScheduler.TestKillAllEnemies();
                 }
             }
 

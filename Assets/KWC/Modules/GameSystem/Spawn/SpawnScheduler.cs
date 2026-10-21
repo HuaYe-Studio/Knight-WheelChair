@@ -3,6 +3,7 @@ using KWC.Data;
 using KWC.Enemy;
 using UnityEngine;
 using System;
+using KWC.Combat;
 
 namespace KWC.GameSystem
 {
@@ -16,6 +17,9 @@ namespace KWC.GameSystem
         [SerializeField] private PrefabPool enemyPool;
         [SerializeField] private Enemy1Config enemy1Config;
         [SerializeField] private TestPlayerContext playerContext;
+
+        [Header("战斗接线引用")]
+        [SerializeField]private PlayerInitializer playerInitializer;
 
         [Header("生成测试区")]
         [SerializeField] private int waveIndex = 1;
@@ -43,6 +47,18 @@ namespace KWC.GameSystem
         private void Update()
         {
             InWave();
+        }
+
+        private void LateUpdate()
+        {
+            while (queueDeath.Count > 0)
+            {
+                var death = queueDeath.Dequeue();
+                if (death.enemy != null)
+                {
+                    RecycleEnemy(death.enemy, death.lifeId);
+                }
+            }
         }
 
         private void OnDisable()
@@ -96,6 +112,12 @@ namespace KWC.GameSystem
                 return;
             }
 
+            if (playerInitializer == null)
+            {
+                Debug.LogError("assign the player initializer before starting a wave.", this);
+                return;
+            }
+
             #endregion
 
             #region 组件守卫
@@ -120,9 +142,15 @@ namespace KWC.GameSystem
                 return;
             }
 
-            if (!enemy.TryGetComponent<LogOnlyCombatBridge>(out _))
+            if (!enemy.TryGetComponent<EnemyCombatBridge>(out _))
             {
-                Debug.LogError("need LogOnlyCombat component before starting a wave.", this);
+                Debug.LogError("need EnemyCombatBridge component before starting a wave.", this);
+                return;
+            }
+
+            if(!enemy.TryGetComponent<Health>(out _))
+            {
+                Debug.LogError("need Health component before starting a wave.", this);
                 return;
             }
 
@@ -305,9 +333,25 @@ namespace KWC.GameSystem
             GameObject enemy = livedEnemy[0];
             var controller = enemy.GetComponent<Enemy1Controller>();
             int lifeId = controller.LifeId;
-            controller.ReportEnemyDied(lifeId);
 
-            RecycleEnemy(enemy, lifeId);
+            var health =enemy.GetComponent<Health>();
+            health.TryApplyDamage(health.CurrentHp,lifeId);
+        }
+
+        public void TestKillAllEnemies()
+        {
+            if (livedEnemy.Count == 0)
+                return;
+
+            for (int i = 0; i < livedEnemy.Count; i++)
+            {
+                GameObject enemy = livedEnemy[i];
+                var controller = enemy.GetComponent<Enemy1Controller>();
+                int lifeId = controller.LifeId;
+
+                var health =enemy.GetComponent<Health>();
+                health.TryApplyDamage(health.CurrentHp,lifeId);
+            }
         }
 
         //测试
@@ -378,6 +422,7 @@ namespace KWC.GameSystem
 
             livedSpawnWarnings.Clear();
             livedEnemy.Clear();
+            queueDeath.Clear();
             runIndex++;
             isInWave = false;
 
@@ -391,9 +436,10 @@ namespace KWC.GameSystem
             float waveAttack = wave.E1Attack;
 
             var controller = enemyGo.GetComponent<Enemy1Controller>();
-            var bridge     = enemyGo.GetComponent<LogOnlyCombatBridge>();
+            var bridge     = enemyGo.GetComponent<EnemyCombatBridge>();
             var contact    = enemyGo.GetComponent<PhysicsContactSource>();
             var health     = new FactHealthSource(waveHp);
+            var E1Health   = enemyGo.GetComponent<Health>();
 
             contact.Initialize(playerContext.EntityTransform);
 
@@ -407,7 +453,28 @@ namespace KWC.GameSystem
                 waveHp,
                 waveAttack
             );
+
+            E1Health.Initialize(waveHp,waveHp,controller.LifeId);
+            bridge.Initialize(controller,E1Health,playerInitializer,this);
         }
+
+        private struct QueueDeath
+        {
+            public readonly GameObject enemy;
+            public readonly int lifeId;
+
+            public QueueDeath(GameObject Enemy, int LifeId)
+            {
+                enemy = Enemy;
+                lifeId = LifeId;
+            }
+        }
+        private Queue<QueueDeath> queueDeath = new Queue<QueueDeath>();
+        public void EnqueueDeath(GameObject enemy, int lifeId)
+        {
+            queueDeath.Enqueue(new QueueDeath(enemy,lifeId));
+        }
+
 
 
         #region 对外只读接口
