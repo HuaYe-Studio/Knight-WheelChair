@@ -1,25 +1,21 @@
 ﻿using System.Collections.Generic;
 using KWC.Data;
-using KWC.Enemy;
 using UnityEngine;
 using System;
-using KWC.Combat;
 
 namespace KWC.GameSystem
 {
+    /// <summary>
+    /// 波次调度：按 WaveSetConfig（波次集合配置）计时、租用预警并按批次生成敌人。
+    /// 不拥有敌人生命周期：生成交给 EnemyLifeCycle（敌人生命周期），波末清理也委托它执行。
+    /// StopWave 用于中止（玩家死亡、场景卸载），不会自增波号，也不触发 WaveEnded。
+    /// </summary>
     public class SpawnScheduler:MonoBehaviour
     {
         [Header("引用")]
         [SerializeField] private PrefabPool warningPool;
-        [SerializeField] private WaveSetConfig waveSetConfig;
-
-        [Header("敌人接线引用")]
-        [SerializeField] private PrefabPool enemyPool;
-        [SerializeField] private Enemy1Config enemy1Config;
-        [SerializeField] private TestPlayerContext playerContext;
-
-        [Header("战斗接线引用")]
-        [SerializeField]private PlayerInitializer playerInitializer;
+        private GameConfig waveConfig;
+        [SerializeField] private EnemyLifeCycle enemyLifeCycle;
 
         [Header("生成测试区")]
         [SerializeField] private int waveIndex = 1;
@@ -35,13 +31,18 @@ namespace KWC.GameSystem
         private float waveTimer = 0f;
 
         private List<SpawnWarning> livedSpawnWarnings = new List<SpawnWarning>();
-        private List<GameObject> livedEnemy = new List<GameObject>();
 
         [SerializeField] private bool isInWave = false;
         [SerializeField] private bool isInBossWave = false;
+        private bool isInitialized = false;
 
+        /// <summary>波次真正开始时触发，参数为当前波号；只表示进度，不代表击杀数。</summary>
         public event Action<int> WaveChanged;
-        //仅处理波次正常结束
+
+        /// <summary>
+        /// 普通波次正常结束时触发（计时到，或计划敌人全部生成并已回收）。
+        /// 触发时清理已完成且 waveIndex 已指向下一波；StopWave 不触发本事件。
+        /// </summary>
         public event Action WaveEnded;
 
         private void Update()
@@ -49,124 +50,68 @@ namespace KWC.GameSystem
             InWave();
         }
 
-        private void LateUpdate()
-        {
-            while (queueDeath.Count > 0)
-            {
-                var death = queueDeath.Dequeue();
-                if (death.enemy != null)
-                {
-                    RecycleEnemy(death.enemy, death.lifeId);
-                }
-            }
-        }
-
         private void OnDisable()
         {
             StopWave();
         }
 
-        public void InitializeWave()
+        /// <summary>
+        /// 由流程层在场景启用时调用一次：缓存配置并校验预警池。
+        /// 返回 false 时不要继续调用 InitializeWave。
+        /// </summary>
+        public bool Initialize(GameConfig waveSetConfig)
         {
-            #region 引用守卫
-
-            if (waveSetConfig == null)
-            {
-                Debug.LogError("assign the Waves config before starting a wave.", this);
-                return;
-            }
-
-            if (enemy1Config == null)
-            {
-                Debug.LogError("assign the E1 config before starting a wave.", this);
-                return;
-            }
+            isInitialized = false;
+            waveConfig = waveSetConfig;
 
             if (warningPool == null)
             {
                 Debug.LogError("assign the warning pool before starting a wave.", this);
-                return;
+                return false;
             }
 
             if (warningPool.Prefab == null)
             {
                 Debug.LogError("assign the prefab in warning pool before starting a wave.", this);
-                return;
-            }
-
-            if (enemyPool == null)
-            {
-                Debug.LogError("assign the enemy pool before starting a wave.", this);
-                return;
-            }
-
-            if (enemyPool.Prefab == null)
-            {
-                Debug.LogError("assign the prefab in enemy pool before starting a wave.", this);
-                return;
-            }
-
-            if (playerContext == null)
-            {
-                Debug.LogError("assign the player context before starting a wave.", this);
-                return;
-            }
-
-            if (playerInitializer == null)
-            {
-                Debug.LogError("assign the player initializer before starting a wave.", this);
-                return;
-            }
-
-            #endregion
-
-            #region 组件守卫
-
-            GameObject enemy = enemyPool.Prefab;
-
-            if (!enemy.TryGetComponent<Enemy1Controller>(out _))
-            {
-                Debug.LogError("need Enemy1Controller component before starting a wave.", this);
-                return;
-            }
-
-            if (!enemy.TryGetComponent<SimpleMovementHandler>(out _))
-            {
-                Debug.LogError("need SimpleMovementHandler component before starting a wave.", this);
-                return;
-            }
-
-            if (!enemy.TryGetComponent<PhysicsContactSource>(out _))
-            {
-                Debug.LogError("need PhysicsContactSource component before starting a wave.", this);
-                return;
-            }
-
-            if (!enemy.TryGetComponent<EnemyCombatBridge>(out _))
-            {
-                Debug.LogError("need EnemyCombatBridge component before starting a wave.", this);
-                return;
-            }
-
-            if(!enemy.TryGetComponent<Health>(out _))
-            {
-                Debug.LogError("need Health component before starting a wave.", this);
-                return;
+                return false;
             }
 
             GameObject warning = warningPool.Prefab;
             if (!warning.TryGetComponent<SpawnWarning>(out _))
             {
                 Debug.LogError("need SpawnWarning component before starting a wave.", this);
+                return false;
+            }
+
+            isInitialized = true;
+            return isInitialized;
+        }
+
+        /// <summary>
+        /// 由流程层在玩家和敌人就绪后调用。未在波中时按 waveIndex 查找定义并开始；
+        /// 重复调用在波中会被忽略。Boss 波当前仅记录占位日志，不会进入波次状态。
+        /// </summary>
+        public void InitializeWave()
+        {
+            if(!isInitialized)
+                return;
+
+            if (waveConfig == null || waveConfig.Waves == null)
+            {
+                Debug.LogError("assign the Waves config before starting a wave.", this);
                 return;
             }
 
-            #endregion
+            if (enemyLifeCycle == null || !enemyLifeCycle.isInitialized)
+            {
+                Debug.LogError("assign initialized enemyLifeCycle before starting a wave.");
+                return;
+            }
 
             if (!isInWave)
             {
                 WaveDefinition found = null;
-                foreach (WaveDefinition waves in waveSetConfig.Waves)
+                foreach (WaveDefinition waves in waveConfig.Waves.Waves)
                 {
                     if (waves.WaveIndex == waveIndex)
                     {
@@ -199,9 +144,8 @@ namespace KWC.GameSystem
                 generatedEnemy = 0;
                 preparedEnemy = 0;
                 generateIntervalTimer = 0f;
-                waveTimer = useTestWaveTime ? testWaveTime : waveSetConfig.NormalWaveDuration;
+                waveTimer = useTestWaveTime ? testWaveTime : waveConfig.Waves.NormalWaveDuration;
                 livedSpawnWarnings.Clear();
-                livedEnemy.Clear();
                 isInWave = true;
                 isInBossWave = false;
                 WaveChanged?.Invoke(waveIndex);
@@ -224,7 +168,7 @@ namespace KWC.GameSystem
                 return;
             }
 
-            if (generatedEnemy == spawnCount && livedEnemy.Count == 0)
+            if (generatedEnemy == spawnCount && enemyLifeCycle.GetLivedEnemyCount() == 0)
             {
                 Debug.Log("提前杀死所有敌人，波次结束");
                 EndWave();
@@ -237,6 +181,9 @@ namespace KWC.GameSystem
                 generateIntervalTimer += wave.SpawnInterval;
                 for (int count = 0; count < wave.SpawnBatchCount && preparedEnemy < spawnCount; count++)
                 {
+                    float hp = wave.E1Hp;
+                    float attack = wave.E1Attack;
+
                     Vector3 testSpawnPosition = GetTestSpawnPosition();
                     warningPool.Rent(testSpawnPosition, Quaternion.identity, go =>
                     {
@@ -244,7 +191,7 @@ namespace KWC.GameSystem
                         var spawnWarning = go.GetComponent<SpawnWarning>();
                         preparedEnemy++;
                         livedSpawnWarnings.Add(spawnWarning);
-                        spawnWarning.InitializeWarning(waveSetConfig.EnemySpawnWarningTime, () =>
+                        spawnWarning.InitializeWarning(waveConfig.Waves.EnemySpawnWarningTime, () =>
                         {
                             if(runId != runIndex)
                                 return;
@@ -254,7 +201,9 @@ namespace KWC.GameSystem
 
                             try
                             {
-                                enemy = enemyPool.Rent(go.transform.position, go.transform.rotation, InitializeEnemy1);
+                                bool success = enemyLifeCycle.TryGenerateEnemy1(out enemy,go.transform.position,go.transform.rotation, hp, attack);
+                                if(success)
+                                    generatedEnemy++;
                             }
                             finally
                             {
@@ -262,8 +211,6 @@ namespace KWC.GameSystem
                                 livedSpawnWarnings.Remove(spawnWarning);
                             }
 
-                            livedEnemy.Add(enemy);
-                            generatedEnemy++;
                             if (generatedEnemy == spawnCount)
                             {
                                 Debug.Log("Enemy Totally generated!");
@@ -290,6 +237,10 @@ namespace KWC.GameSystem
 
         }
 
+        /// <summary>
+        /// 中止当前波：取消未完成的预警、回收在场敌人与拾取物。
+        /// 不会自增 waveIndex，也不触发 WaveEnded；用于玩家死亡或场景卸载。
+        /// </summary>
         public void StopWave()
         {
             if(!isInWave)
@@ -324,176 +275,57 @@ namespace KWC.GameSystem
             Debug.Log("Boss波次未实现");
         }
 
-        //纯测试,combat那边完善就删
-        public void TestKillOneEnemy()
-        {
-            if (livedEnemy.Count == 0)
-                return;
-
-            GameObject enemy = livedEnemy[0];
-            var controller = enemy.GetComponent<Enemy1Controller>();
-            int lifeId = controller.LifeId;
-
-            var health =enemy.GetComponent<Health>();
-            health.TryApplyDamage(health.CurrentHp,lifeId);
-        }
-
-        public void TestKillAllEnemies()
-        {
-            if (livedEnemy.Count == 0)
-                return;
-
-            for (int i = 0; i < livedEnemy.Count; i++)
-            {
-                GameObject enemy = livedEnemy[i];
-                var controller = enemy.GetComponent<Enemy1Controller>();
-                int lifeId = controller.LifeId;
-
-                var health =enemy.GetComponent<Health>();
-                health.TryApplyDamage(health.CurrentHp,lifeId);
-            }
-        }
-
-        //测试
-        public void TestRecycle()
-        {
-            if (livedEnemy.Count == 0)
-                return;
-
-            GameObject enemy = livedEnemy[0];
-            var controller = enemy.GetComponent<Enemy1Controller>();
-            int testRecycleLifeId = controller.LifeId - 1;
-            int countBefore = livedEnemy.Count;
-
-            bool accepted = RecycleEnemy(enemy, testRecycleLifeId);
-            bool pass = !accepted && livedEnemy.Count == countBefore && enemy.activeSelf;
-            Debug.Log($"迟到回收测试：testRecycleLifeId={testRecycleLifeId}，当前 lifeId={controller.LifeId}，accepted={accepted}（应为 false）；"+
-                      $"{(pass ? "Success" : "Fail")}");
-        }
-        //处理敌人死亡
-        public bool RecycleEnemy(GameObject enemy,int lifeId)
-        {
-            int id = enemy.GetComponent<Enemy1Controller>().LifeId;
-            if (id != lifeId)
-            {
-                Debug.LogWarning("回收时出现life id错误");
-                return false;
-            }
-
-            if (!livedEnemy.Remove(enemy))
-                return false;
-
-            EnemyReset(enemy);
-            return true;
-        }
-
-        private void EnemyReset(GameObject enemy)
-        {
-            enemy.GetComponent<PhysicsContactSource>().ResetContact();
-            enemy.GetComponent<Enemy1Controller>().ResetForReuse();
-            enemyPool.Return(enemy);
-        }
-
         //改为了回收
         private void ClearSpawnState()
         {
-            if (warningPool != null)
+            try
             {
-                foreach (var livedWarning in livedSpawnWarnings)
+                if (warningPool != null)
                 {
-                    if(livedWarning == null)
-                        continue;
+                    foreach (var livedWarning in livedSpawnWarnings)
+                    {
+                        if (livedWarning == null)
+                            continue;
 
-                    livedWarning.CancelWarning();
-                    warningPool.Return(livedWarning.gameObject);
+                        livedWarning.CancelWarning();
+                        warningPool.Return(livedWarning.gameObject);
+                    }
                 }
             }
-
-            if (enemyPool != null)
+            finally
             {
-                foreach (var enemy in livedEnemy)
-                {
-                    if(enemy == null)
-                        continue;
+                livedSpawnWarnings.Clear();
+                if(enemyLifeCycle!=null)
+                    enemyLifeCycle.ClearEnemySpawnState();
+                runIndex++;
+                isInWave = false;
 
-                    EnemyReset(enemy);
-                }
-            }
-
-            livedSpawnWarnings.Clear();
-            livedEnemy.Clear();
-            queueDeath.Clear();
-            runIndex++;
-            isInWave = false;
-
-            //待boss逻辑完善修改位置
-            isInBossWave = false;
-        }
-
-        private void InitializeEnemy1(GameObject enemyGo)
-        {
-            float waveHp = wave.E1Hp;
-            float waveAttack = wave.E1Attack;
-
-            var controller = enemyGo.GetComponent<Enemy1Controller>();
-            var bridge     = enemyGo.GetComponent<EnemyCombatBridge>();
-            var contact    = enemyGo.GetComponent<PhysicsContactSource>();
-            var health     = new FactHealthSource(waveHp);
-            var E1Health   = enemyGo.GetComponent<Health>();
-
-            contact.Initialize(playerContext.EntityTransform);
-
-            controller.Initialize(
-                playerContext,
-                enemyGo.GetComponent<SimpleMovementHandler>(),
-                contact,
-                bridge,
-                enemy1Config,
-                health,
-                waveHp,
-                waveAttack
-            );
-
-            E1Health.Initialize(waveHp,waveHp,controller.LifeId);
-            bridge.Initialize(controller,E1Health,playerInitializer,this);
-        }
-
-        private struct QueueDeath
-        {
-            public readonly GameObject enemy;
-            public readonly int lifeId;
-
-            public QueueDeath(GameObject Enemy, int LifeId)
-            {
-                enemy = Enemy;
-                lifeId = LifeId;
+                //待boss逻辑完善修改位置
+                isInBossWave = false;
             }
         }
-        private Queue<QueueDeath> queueDeath = new Queue<QueueDeath>();
-        public void EnqueueDeath(GameObject enemy, int lifeId)
-        {
-            queueDeath.Enqueue(new QueueDeath(enemy,lifeId));
-        }
-
-
 
         #region 对外只读接口
 
+        /// <summary>下一次 InitializeWave 使用的波号；EndWave 触发后已自增。</summary>
         public int GetWaveIndex()
         {
             return waveIndex;
         }
 
+        /// <summary>当前是否处于普通波次进行中。</summary>
         public bool IsInWave()
         {
             return isInWave;
         }
 
+        /// <summary>Boss 波是否进行中；Boss 波尚未实现，当前始终为 false。</summary>
         public bool IsInBossWave()
         {
             return isInBossWave;
         }
 
+        /// <summary>剩余波次时间；未开波返回 -1，Boss 波（实现后）返回 Infinity。</summary>
         public float GetWaveTime()
         {
             if (!isInWave)
@@ -510,12 +342,6 @@ namespace KWC.GameSystem
                 return waveTimer;
             }
         }
-
-        public int GetLivedEnemyCount()
-        {
-            return livedEnemy.Count;
-        }
-
         #endregion
     }
 }

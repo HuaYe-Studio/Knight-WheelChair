@@ -16,6 +16,7 @@ GameObject:
   - component: {fileID: 4446653807963566104}
   - component: {fileID: 6655626295332069199}
   - component: {fileID: 679447599739541646}
+  - component: {fileID: 8133076848354485341}
   m_Layer: 0
   m_Name: TestEnemyCube
   m_TagString: Untagged
@@ -150,5 +151,17 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3bc203254d664898ba56ad32b71f731e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &8133076848354485341
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5109501656929289628}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e831ad6c0eaf4a8a9518e83bc2b05498, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 

@@ -1,11 +1,17 @@
 ﻿using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
 
 namespace KWC.GameSystem
 {
-    public class TestSpawnSchedulerDriver : MonoBehaviour
+    /// <summary>
+    /// 开发期测试按键驱动：F1 开波、F2 停波、F3 预警池往返测试、
+    /// F4 击杀（Inspector 开关决定单个/全部）、F5 迟到回收测试。不属于正式玩法。
+    /// </summary>
+    public class TestDriver : MonoBehaviour
     {
         [SerializeField] private SpawnScheduler spawnScheduler;
+        [SerializeField] private EnemyLifeCycle enemyLifeCycle;
         [SerializeField] private PrefabPool warningPool;
         [SerializeField] private int testFrameRate = 0;
         [SerializeField] private bool wantKillAllEnemies = false;
@@ -21,7 +27,7 @@ namespace KWC.GameSystem
 
         private void Update()
         {
-            if (Keyboard.current == null || spawnScheduler == null)
+            if (Keyboard.current == null || spawnScheduler == null || enemyLifeCycle == null)
                 return;
 
             if (Keyboard.current.f1Key.wasPressedThisFrame)
@@ -43,17 +49,17 @@ namespace KWC.GameSystem
             {
                 if (!wantKillAllEnemies)
                 {
-                    spawnScheduler.TestKillOneEnemy();
+                    enemyLifeCycle.TestKillOneEnemy();
                 }
                 else
                 {
-                    spawnScheduler.TestKillAllEnemies();
+                    enemyLifeCycle.TestKillAllEnemies();
                 }
             }
 
             if (Keyboard.current.f5Key.wasPressedThisFrame)
             {
-                spawnScheduler.TestRecycle();
+                enemyLifeCycle.TestRecycle();
             }
         }
 
