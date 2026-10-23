@@ -5,11 +5,13 @@ using UnityEngine;
 namespace KWC.Combat
 {
     /// <summary>
-    /// 经验球的消费与回收。外部确认玩家满足拾取条件后调用TryCollect。
-    /// 本组件不决定拾取距离、碰撞类型或吸附方式。
+    /// 经验球的靠近拾取、消费与回收。绑定拾取入口后，每帧请求距离检测。
+    /// TryCollect保留为结算入口；自动拾取的距离与阶段许可由PlayerPickupCollector检查。
     /// </summary>
     public sealed class ExpOrb : MonoBehaviour
     {
+        [SerializeField, Min(0f)] private float pickupRadius = 1f;
+        private PlayerPickupCollector collector;
         private IObjectPool pool;
         private int experience;
         private bool available;
@@ -18,15 +20,22 @@ namespace KWC.Combat
         // 每次从池中取出都会产生新编号，延迟拾取请求必须携带当时记录的编号。
         public int SpawnId => spawnId;
         public bool CanCollect => available;
+        public float PickupRadius => pickupRadius;
 
-        public void Initialize(IObjectPool ownerPool, int expAmount)
+        public void Initialize(IObjectPool ownerPool, int expAmount, PlayerPickupCollector pickupCollector = null)
         {
             if (ownerPool == null) throw new ArgumentNullException(nameof(ownerPool));
             if (expAmount <= 0) throw new ArgumentOutOfRangeException(nameof(expAmount));
             pool = ownerPool;
             experience = expAmount;
+            collector = pickupCollector;
             spawnId = checked(spawnId + 1);
             available = true;
+        }
+
+        private void Update()
+        {
+            if (collector != null) collector.TryCollect(this);
         }
 
         /// <summary>
@@ -57,6 +66,7 @@ namespace KWC.Combat
         private void OnDisable()
         {
             available = false;
+            collector = null;
         }
     }
 }

@@ -18,6 +18,7 @@ namespace KWC.Combat
         private bool dropped;
         private IObjectPool expOrbPool;
         private IObjectPool healthPackPool;
+        private PlayerPickupCollector pickupCollector;
         private int dropCountMin;
         private int dropCountMax;
         private int expPerOrb;
@@ -27,9 +28,10 @@ namespace KWC.Combat
         /// <summary>
         /// 在敌人Health初始化后调用，两个池分别对应ExpOrb和HealthPack的Prefab。
         /// 当前只实现普通敌人掉落；Boss传true时不使用这套普通敌人奖励。
+        /// 传入玩家拾取入口后，生成的物品会自动检测距离；省略时保持仅结算的旧用法。
         /// </summary>
         public void Initialize(Health health, bool boss, CombatRulesConfig rules,
-            IObjectPool orbPool, IObjectPool packPool)
+            IObjectPool orbPool, IObjectPool packPool, PlayerPickupCollector collector = null)
         {
             if (health == null || !health.IsInitialized)
                 throw new ArgumentException("Initialize the enemy Health first.", nameof(health));
@@ -45,6 +47,7 @@ namespace KWC.Combat
             isBoss = boss;
             expOrbPool = orbPool;
             healthPackPool = packPool;
+            pickupCollector = collector;
             // 数值从已有配置复制，本组件不另设默认概率、数量或奖励。
             dropCountMin = rules.DropCountMin;
             dropCountMax = rules.DropCountMax;
@@ -102,19 +105,20 @@ namespace KWC.Combat
         private void InitializeExpOrb(GameObject instance)
         {
             ExpOrb orb = instance.GetComponent<ExpOrb>();
-            orb.Initialize(expOrbPool, expPerOrb);
+            orb.Initialize(expOrbPool, expPerOrb, pickupCollector);
         }
 
         private void InitializeHealthPack(GameObject instance)
         {
             HealthPack pack = instance.GetComponent<HealthPack>();
-            pack.Initialize(healthPackPool, healthPackHealRatio);
+            pack.Initialize(healthPackPool, healthPackHealRatio, pickupCollector);
         }
 
         // 非击杀清理只使当前掉落入口失效，不生成奖励。
         private void OnDisable()
         {
             initialized = false;
+            pickupCollector = null;
         }
     }
 }
