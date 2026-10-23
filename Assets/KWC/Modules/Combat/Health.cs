@@ -97,6 +97,22 @@ namespace KWC.Combat
         }
 
         /// <summary>
+        /// 提高最大HP，并给当前HP增加同样的数值，保留原有缺血量。
+        /// newMaxHp是新的总上限；死亡、旧生命或没有提高上限时返回false。
+        /// </summary>
+        public bool TryIncreaseMaxHp(float newMaxHp, int expectedLifeId)
+        {
+            if (!CanChange(expectedLifeId) || !CombatMath.IsFinite(newMaxHp) || newMaxHp <= maxHp)
+                return false;
+
+            float increase = newMaxHp - maxHp;
+            currentHp = Mathf.Min(newMaxHp, currentHp + increase);
+            maxHp = newMaxHp;
+            HealthChanged?.Invoke(expectedLifeId, currentHp, maxHp);
+            return true;
+        }
+
+        /// <summary>
         /// 结束本次生命，使后续请求失效。用于波末清理等非击杀路径，不发送死亡通知。
         /// 保留 lifeId，确保下次复用必须使用更大的编号。
         /// </summary>
