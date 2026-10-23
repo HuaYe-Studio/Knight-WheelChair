@@ -226,7 +226,7 @@ bool usedPack = healthPack.TryCollect(playerHealth, packId);
 
 此次隔离工程只载入Combat、必要Core/配置及现有PrefabPool；本机包管理器启动失败后使用 `-noUpm` 完成检查。它不等于整个KWC编译、公共场景、物理交互或Windows构建验收。团队基线2022.3.62f3c1与本机2022.3.62f3不同，PR未修改项目版本或包配置；基线版本整项目复核仍待Reviewer执行。临时工程与验证产物不入库，完成后清理。
 
-Enemy的 `ICombatBridge` 仍为待Review提案，本模块没有修改其接口或接通真实战斗。玩家无敌计时和多来源受伤已按本页2026-10-21记录实现组件，正式接线仍待协作；购买HP变化及拾取距离继续待确认。
+Enemy的 `ICombatBridge` 仍为待Review提案，本模块没有修改其接口或接通真实战斗。玩家无敌计时和多来源受伤已按本页2026-10-21记录实现组件，靠近拾取已按2026-10-23记录实现，正式接线仍待协作；购买HP变化继续待确认。
 
 ### Reviewer最小复现步骤
 
