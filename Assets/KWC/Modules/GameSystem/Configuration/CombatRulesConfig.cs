@@ -36,6 +36,6 @@ namespace KWC.Data
         public int AttributeUpgradeCost => attributeUpgradeCost;
         public float PlayerInvulnerabilityTime => playerInvulnerabilityTime;
 
-        // Initial level/points, EXP carryover and pickup distances remain undecided.
+        // 初始等级/成长点与拾取距离仍待确认；经验结转与连续升级由Combat统一结算。
     }
 }
