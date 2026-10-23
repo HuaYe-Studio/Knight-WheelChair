@@ -4,9 +4,23 @@
 
 实现 `KWC.Core.IPlayerStats`，唯一维护玩家/敌人/Boss HP及玩家属性/EXP/等级/成长点/属性等级。通过 IPlayerContext 读位置，通过 IObjectPool 复用对象。UI提交购买请求，Combat校验，不能把购买计算交给UI。
 
-公式/数值以项目根目录《数值设计》为准；属性无20级上限。死亡只通知一次，波末清理不产生击杀收益。经验保留超额部分并允许连续升级。玩家受伤与靠近拾取采用下方葛亮亮确认的规则；购买HP后当前血量的变化、初始等级与成长点、子弹参数仍需确认。
+公式/数值以项目根目录《数值设计》为准；属性无20级上限。死亡只通知一次，波末清理不产生击杀收益。经验保留超额部分并允许连续升级。玩家受伤、靠近拾取与HP购买采用下方葛亮亮确认的规则；初始等级与成长点、子弹参数仍需确认。
 
 ## 当前实现
+
+### HP属性购买（2026-10-23）
+
+葛亮亮本轮确认采用“最大HP增加多少，当前HP也增加多少”，保留原先缺失的血量。数值仍使用PlayerBaseConfig.PlayerHp与AttributeGrowthConfig中的HP成长参数（当前基础100、B=15、G=5）：60/100购买后依次为75/115、95/135；满血购买仍满血，死亡不购买、不复活。每次消耗现有AttributeUpgradeCost，使用已有SetPurchasingEnabled许可。
+
+- UI沿用`playerStats.TryUpgradeAttribute(AttributeType.Hp)`；GetAttributeRank返回实际HP阶数，初始化清零，无20阶上限。HP基础值与成长参数在PlayerStats初始化时复制，不改写SO。
+- Health新增`TryIncreaseMaxHp(newMaxHp, expectedLifeId)`，参数是**新的总上限**。它校验当前存活生命与有效增量，同时写入当前/最大HP，再发送一次HealthChanged。失败不通知。
+- HP购买先计算下一阶总值、写好阶数与成长点，再交给Health更新血量，保证HealthChanged监听者能读到完整结果；Health拒绝时恢复本次点数与阶数。成功后同一生命再通知一次StatsChanged。
+- HP购买通知期间拒绝再次购买任何属性，防止UI回调重复扣点；try/finally保证处理结束后释放保护。监听者仍不应抛异常或重建玩家；若回调已换生命，则不再向新状态发送旧购买的StatsChanged。
+- HP购买不改变LifeId、不重置无敌、不切换阶段。治疗与血包继续读取Health的最新上限，UI/Player仍使用原IPlayerStats，无Core或其他模块代码变化。
+
+复现：用100最大HP、60当前HP、2成长点初始化玩家并打开购买，连续购买两次HP，检查75/115、95/135、阶数2和剩余点数0；第三次失败且状态不变。分别确认满血购买、死亡拒绝，以及HealthChanged内读取成长点/阶数的结果。新一条生命必须重新初始化Health和PlayerStats。
+
+本轮通过Unity 2022.3.62f3隔离真实Play Mode的46项检查（`HP_UPGRADE_PLAY_PASS=46`），覆盖缺血/满血、连续购买与21阶、配置快照、失败不扣点、死亡/旧生命、事件顺序与同步重入/复用、通知异常后的保护释放、升级后血包与治疗、无敌保持、原三项购买及经验连续升级。17份被测源码和meta与交付一致，临时验证工程已清理；不代表团队2022.3.62f3c1整项目或正式UI/阶段接线验收。
 
 ### 靠近自动拾取（2026-10-23）
 
@@ -100,29 +114,29 @@ Health使用Mathf.Min/Max表达血量上下限，去掉通知前多余的临时�
 
 - `Health`：当前/最大 HP 的唯一维护者，提供伤害、治疗、生命结束与一次性死亡通知。
 - `PlayerDamageReceiver`：玩家受伤入口，处理首笔有效伤害后的0.5秒无敌、受伤许可与冻结/恢复。阵营/有效命中判定及Enemy请求适配仍待联合接线。
-- `PlayerStats`：实现 `IPlayerStats`，维护玩家运行时属性、经验、等级、成长点和三项属性阶数。HP直接读取对应 `Health`；攻击力、移动速度、攻速从 `PlayerBaseConfig` 初始化，购买后使用成长配置重算，不修改配置资产。经验增加、连续升级和成长点发放也由本组件统一完成。
+- `PlayerStats`：实现 `IPlayerStats`，维护玩家运行时属性、经验、等级、成长点和四项属性阶数。HP直接读取对应 `Health`；攻击力、移动速度、攻速从 `PlayerBaseConfig` 初始化，购买后使用成长配置重算，不修改配置资产。经验增加、连续升级和成长点发放也由本组件统一完成。
 - `CombatMath`：实现攻击间隔、伤害、目标等级经验门槛、属性增量和最终值公式。属性等级允许超过20；浮点伤害保留公式结果，没有增加取整规则。
 - `EnemyDrops`：对普通敌人的一次有效死亡申请经验球和血包，使用外部提供的两个 `IObjectPool`；掉落与回收的顺序由流程层控制。
 - `PlayerPickupCollector`：读取玩家位置，检查拾取许可、玩家生命与物品距离；不接管玩家移动或阶段切换。
 - `ExpOrb` / `HealthPack`：每帧向绑定的PlayerPickupCollector请求距离检测，处理一次拾取的经验或治疗结算，并归还所属对象池。
 
-已支持经验升级、攻击/移动/攻速三项属性购买，以及普通敌人掉落、靠近拾取和奖励结算；`GetAttributeRank` 返回实际阶数，HP暂时返回0。武器、子弹和HP购买尚未实现；经验球与血包Prefab已交付；场景、玩家引用、阶段许可和池接线由GameSystem负责。
+已支持经验升级、HP/攻击/移动/攻速四项属性购买，以及普通敌人掉落、靠近拾取和奖励结算；`GetAttributeRank` 返回四项实际阶数。武器、子弹尚未实现；经验球与血包Prefab已交付；场景、玩家引用、阶段许可和池接线由GameSystem负责。
 
 ### 初始化与生命周期
 
 1. 流程层准备好生命编号，调用 `Health.Initialize(maximumHp, initialHp, lifeId)`。初始HP显式传入，新编号必须大于该组件之前的编号；Enemy接线时与它当前的 `LifeId` 对齐。
-2. 玩家调用 `PlayerStats.Initialize(config, health, growthConfig, rulesConfig, initialLevel, initialExp, initialGrowthPoints)`。调用方应使用基础配置的HP初始化Health，并传入同一局的成长和战斗规则配置。基础值、成长系数、购买价格、经验系数和每级成长点奖励在初始化时复制，运行中不改写SO。初始进度无默认值，由调用方明确提供；initialExp是当前级内的经验，须低于下一等级门槛。初始化不升级、不发奖励或事件，重置三项阶数并关闭购买。
+2. 玩家调用 `PlayerStats.Initialize(config, health, growthConfig, rulesConfig, initialLevel, initialExp, initialGrowthPoints)`。调用方应使用基础配置的HP初始化Health，并传入同一局的成长和战斗规则配置。基础值、成长系数、购买价格、经验系数和每级成长点奖励在初始化时复制，运行中不改写SO。初始进度无默认值，由调用方明确提供；initialExp是当前级内的经验，须低于下一等级门槛。初始化不升级、不发奖励或事件，重置四项阶数并关闭购买。
 3. `TryApplyDamage(amount, lifeId)` / `TryHeal(amount, lifeId)` 返回值表示HP是否实际发生变化，拒绝未初始化、过期编号、死亡后的操作和无效数值。治疗不超过最大HP，也不复活。
 4. `HealthChanged(lifeId, currentHp, maxHp)` 提供结算后的快照，`Died(lifeId)` 每条生命最多通知一次。初始化与清理不发死亡通知；初始化后使用方先读快照，再按生命周期维护订阅。
 5. `EndLife()` 用于非击杀清理；组件 `OnDisable` 也会调用它。重新启用前必须重新初始化，不能靠旧HP继续战斗。Health进入新生命后，旧 `PlayerStats` 视图失效，也须重新初始化。
 
 Health死亡通知后，停行为、掉落与对象回收的顺序仍由后续集成层显式组织。监听器不能提前回收对象或抛出异常来中断该链路。发生回调重入并已开始新生命时，Health会拒绝发送上一生命的迟到死亡通知。
 
-### 三项属性购买
+### 四项属性购买
 
 - GameSystem进入Upgrade时调用 `SetPurchasingEnabled(true)`，离开Upgrade时调用 `SetPurchasingEnabled(false)`。默认关闭；当前只是提供接线入口，尚未自动绑定GameManager事件，也不制定暂停策略。
-- UI调用 `TryUpgradeAttribute(AttributeType.Attack / Movement / AttackSpeed)`。成功扣除配置中的 `AttributeUpgradeCost`（当前为1），对应阶数加1，并从基础值按总值公式重算。未花点保留，不设20级上限。
-- 未开放购买、点数不足、玩家死亡、旧生命视图、HP或未知属性请求均返回false，不修改状态。HP提升的当前血量处理仍待确认。
+- UI调用 `TryUpgradeAttribute(AttributeType.Hp / Attack / Movement / AttackSpeed)`。成功扣除配置中的 `AttributeUpgradeCost`（当前为1），对应阶数加1，并从基础值按总值公式重算。未花点保留，不设20级上限。
+- 未开放购买、点数不足、玩家死亡、旧生命视图或未知属性请求均返回false，不修改状态。HP购买时同时提高当前/最大HP，保留缺血量，详见本页HP购买说明。
 - 每次成功购买只发送一次 `StatsChanged`，此时属性、阶数和剩余点数已一起更新。初始化和失败请求不通知。UI接线时先读取状态，并成对订阅/取消订阅；事件同步执行，监听者负责显示，避免在通知内再次购买、重建状态或抛出异常。
 - 保持Core的 `IPlayerStats` 为只读接口。UI由集成层拿到具体PlayerStats的购买入口与事件；Player仍只读取 `IPlayerStats.PlayerMovement`。
 
@@ -226,7 +240,7 @@ bool usedPack = healthPack.TryCollect(playerHealth, packId);
 
 此次隔离工程只载入Combat、必要Core/配置及现有PrefabPool；本机包管理器启动失败后使用 `-noUpm` 完成检查。它不等于整个KWC编译、公共场景、物理交互或Windows构建验收。团队基线2022.3.62f3c1与本机2022.3.62f3不同，PR未修改项目版本或包配置；基线版本整项目复核仍待Reviewer执行。临时工程与验证产物不入库，完成后清理。
 
-Enemy的 `ICombatBridge` 仍为待Review提案，本模块没有修改其接口或接通真实战斗。玩家无敌计时和多来源受伤已按本页2026-10-21记录实现组件，靠近拾取已按2026-10-23记录实现，正式接线仍待协作；购买HP变化继续待确认。
+Enemy的 `ICombatBridge` 仍为待Review提案，本模块没有修改其接口或接通真实战斗。玩家无敌计时和多来源受伤已按本页2026-10-21记录实现组件，靠近拾取已按2026-10-23记录实现，正式接线仍待协作；HP购买已按本页规则实现，UI购买入口仍待接线。
 
 ### Reviewer最小复现步骤
 

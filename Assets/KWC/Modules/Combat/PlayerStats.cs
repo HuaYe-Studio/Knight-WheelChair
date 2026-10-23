@@ -7,7 +7,7 @@ namespace KWC.Combat
 {
     /// <summary>
     /// 维护玩家属性与成长点，通过 Core 的 IPlayerStats 向其他模块提供只读状态。
-    /// 已支持经验升级和攻击、移动、攻速购买；HP 购买等待规则确认。
+    /// 支持经验升级和HP、攻击、移动、攻速购买。
     /// </summary>
     public sealed class PlayerStats : MonoBehaviour, IPlayerStats
     {
@@ -30,24 +30,29 @@ namespace KWC.Combat
         private int growthPointsPerLevel;
 
         // 保存基础值，用总值公式重算购买结果，避免反复累加浮点增量产生误差。
+        private float baseHp;
         private float baseAttack;
         private float baseMovement;
         private float baseAttackSpeed;
+        private AttributeGrowth hpGrowth;
         private AttributeGrowth attackGrowth;
         private AttributeGrowth movementGrowth;
         private AttributeGrowth attackSpeedGrowth;
+        private int hpRank;
         private int attackRank;
         private int movementRank;
         private int attackSpeedRank;
         private int attributeUpgradeCost;
         private bool purchasingEnabled;
+        private bool hpPurchaseInProgress;
 
         // 本组件和 Health 都有效，且仍属于同一条命，才能对外提供属性。
         public bool IsInitialized => initialized && health != null &&
             health.IsInitialized && health.LifeId == healthLifeId;
 
         // 购买阶段由流程层开关控制，死亡或生命失效后自动拒绝购买。
-        public bool CanPurchaseAttributes => IsInitialized && !health.IsDead && purchasingEnabled;
+        public bool CanPurchaseAttributes => IsInitialized && !health.IsDead && purchasingEnabled &&
+            !hpPurchaseInProgress;
 
         /// <summary>
         /// 成功购买或增加经验后通知状态已更新，监听者通过 IPlayerStats 重新读取状态。
@@ -182,13 +187,16 @@ namespace KWC.Combat
             playerAttack = config.PlayerAttack;
             playerMovement = config.PlayerMovement;
             attackSpeed = config.AttackSpeed;
+            baseHp = config.PlayerHp;
             baseAttack = playerAttack;
             baseMovement = playerMovement;
             baseAttackSpeed = attackSpeed;
+            hpGrowth = growthConfig.GetGrowth(AttributeType.Hp);
             attackGrowth = growthConfig.GetGrowth(AttributeType.Attack);
             movementGrowth = growthConfig.GetGrowth(AttributeType.Movement);
             attackSpeedGrowth = growthConfig.GetGrowth(AttributeType.AttackSpeed);
             attributeUpgradeCost = rulesConfig.AttributeUpgradeCost;
+            hpRank = 0;
             attackRank = 0;
             movementRank = 0;
             attackSpeedRank = 0;
@@ -242,7 +250,7 @@ namespace KWC.Combat
 
         /// <summary>
         /// 查询单项属性的提升次数，与 PlayerLevel 玩家等级不同。
-        /// 三项已实现的属性返回实际阶数；HP 购买未接入，暂时为零阶。
+        /// 四项属性都返回实际阶数，初始化时从零阶开始。
         /// </summary>
         public int GetAttributeRank(AttributeType attribute)
         {
@@ -250,7 +258,7 @@ namespace KWC.Combat
             switch (attribute)
             {
                 case AttributeType.Hp:
-                    return 0;
+                    return hpRank;
                 case AttributeType.Attack:
                     return attackRank;
                 case AttributeType.Movement:
@@ -273,13 +281,16 @@ namespace KWC.Combat
 
         /// <summary>
         /// 购买一次属性提升，成功返回 true，并统一通知属性和点数变化。
-        /// 未开放购买、点数不足、生命无效、HP 或未知属性均返回 false，不扣点。
+        /// 未开放购买、点数不足、生命无效或未知属性均返回 false，不扣点。
         /// </summary>
         public bool TryUpgradeAttribute(AttributeType attribute)
         {
             // 不允许购买或点数不足时直接返回，属性和成长点都保持原值。
             if (!CanPurchaseAttributes || growthPoints < attributeUpgradeCost)
                 return false;
+
+            // HP还会发送HealthChanged，单独处理它的扣点和通知顺序。
+            if (attribute == AttributeType.Hp) return TryUpgradeHp();
 
             // 按下一阶的总值公式重算所选属性，其他属性的阶数不变。
             switch (attribute)
@@ -306,12 +317,45 @@ namespace KWC.Combat
                     return false;
             }
 
-            // 只有支持的属性成功更新后才扣点，HP或未知属性在上方已经返回。
+            // 只有支持的属性成功更新后才扣点，未知属性在上方已经返回。
             growthPoints -= attributeUpgradeCost;
 
             // 先完成属性和点数结算，再发出一次通知，监听者不会读到只改了一半的状态。
             StatsChanged?.Invoke();
             return true;
+        }
+
+        private bool TryUpgradeHp()
+        {
+            int nextRank = checked(hpRank + 1);
+            float nextMaxHp = CombatMath.GetAttributeValue(baseHp, hpGrowth.B, hpGrowth.G, nextRank);
+            Health purchaseHealth = health;
+            int purchaseLifeId = healthLifeId;
+
+            // Health会同步通知UI，先写好阶数与点数，让监听者读到完整的购买结果。
+            hpRank = nextRank;
+            growthPoints -= attributeUpgradeCost;
+            hpPurchaseInProgress = true;
+            try
+            {
+                if (!purchaseHealth.TryIncreaseMaxHp(nextMaxHp, purchaseLifeId))
+                {
+                    // 未改变HP时Health不会发事件，恢复此次预扣的点数和阶数。
+                    hpRank--;
+                    growthPoints += attributeUpgradeCost;
+                    return false;
+                }
+
+                // 通知期间若玩家已换生命，就不再把旧购买的通知送给新状态。
+                if (IsInitialized && health == purchaseHealth && healthLifeId == purchaseLifeId)
+                    StatsChanged?.Invoke();
+                return true;
+            }
+            finally
+            {
+                // 通知中的重复购买会被拦住；通知完成后才允许下一次购买。
+                hpPurchaseInProgress = false;
+            }
         }
 
         // 错误接线或过期访问直接报错，避免向 UI 等模块静默提供无效的默认数值。
