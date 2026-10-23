@@ -4,9 +4,82 @@
 
 实现 `KWC.Core.IPlayerStats`，唯一维护玩家/敌人/Boss HP及玩家属性/EXP/等级/成长点/属性等级。通过 IPlayerContext 读位置，通过 IObjectPool 复用对象。UI提交购买请求，Combat校验，不能把购买计算交给UI。
 
-公式/数值以项目根目录《数值设计》为准；属性无20级上限。死亡只通知一次，波末清理不产生击杀收益。经验保留超额部分并允许连续升级。掉血/购买HP变化的细节、初始等级与成长点、拾取距离、子弹参数、同时受击和取整仍需确认。
+公式/数值以项目根目录《数值设计》为准；属性无20级上限。死亡只通知一次，波末清理不产生击杀收益。经验保留超额部分并允许连续升级。玩家受伤与靠近拾取采用下方葛亮亮确认的规则；购买HP后当前血量的变化、初始等级与成长点、子弹参数仍需确认。
 
 ## 当前实现
+
+### 靠近自动拾取（2026-10-23）
+
+葛亮亮本轮确认：经验球和血包的拾取半径均为1个Unity单位，按玩家位置到物品位置的三维直线距离计算，包含高度差，距离等于半径也可拾取；暂停和Upgrade期间禁止自动拾取，恢复战斗后重新检测距离。此处只实现Combat内部能力，正式场景引用与阶段开关由GameSystem接入；GDD原有待确认文字由设计文档维护方后续同步。
+
+`PlayerPickupCollector`持有同一玩家的IPlayerContext、PlayerStats与Health。两种物品的Update向它请求检测；许可开启、玩家存活且绑定生命有效、物品可消费、距离足够近时，调用原有TryCollect结算。两种Prefab的Pickup Radius均保存为1，可在各自Inspector调整；当前不新增GameSystem配置字段。位置来自IPlayerContext，不使用拾取组件自身的位置，也不决定Player/Map的移动平面。
+
+| 入口 / 状态 | 用法 |
+| --- | --- |
+| `PlayerPickupCollector.Initialize(context, stats, health)` | Health与PlayerStats初始化后调用，三者必须属于同一玩家；记录当前LifeId，默认关闭拾取 |
+| `SetPickupEnabled(bool)` | GameSystem在战斗时开启，暂停、Upgrade或结束本局时关闭 |
+| `CanCollect` | 是否已绑定有效且存活的玩家、组件与玩家实体活动、许可开启；尚不表示某个物品在范围内 |
+| `TryCollect(ExpOrb)` / `TryCollect(HealthPack)` | 完成距离与许可检查后立即结算；通常由物品Update调用 |
+| 两种物品的`Initialize(..., pickupCollector = null)` | 在Rent回调中传入拾取组件；省略时维持原有手动结算用法，复用时不会保留旧绑定 |
+| `EnemyDrops.Initialize(..., collector = null)` | 末尾可传同一玩家的拾取组件，EnemyDrops会在自己的Rent回调里继续传给两种物品 |
+
+```csharp
+// GameSystem提供这些引用；先完成同一玩家的Health和PlayerStats初始化。
+pickupCollector.Initialize(playerContext, playerStats, playerHealth);
+
+// 敌人每次初始化时传入同一个拾取组件，不需要修改对象池实现。
+enemyDrops.Initialize(enemyHealth, isBoss, rulesConfig,
+    expOrbPool, healthPackPool, pickupCollector);
+
+pickupCollector.SetPickupEnabled(true);  // 进入战斗。
+pickupCollector.SetPickupEnabled(false); // 暂停、Upgrade或结束本局。
+pickupCollector.SetPickupEnabled(true);  // 恢复后按当前位置重新检测。
+```
+
+暂停使用许可开关，不禁用组件。禁用PlayerPickupCollector会结束本次绑定，再启用后须重新Initialize；Health进入新生命后也要重新绑定。物品归还时清除其玩家引用，下次Rent重新传入。Player/Enemy完整Prefab、GameSystem与公共场景均未修改，新组件的正式挂载与引用注入仍待对应Owner接线。
+
+原有`ExpOrb.TryCollect(PlayerStats, spawnId)`和`HealthPack.TryCollect(Health, spawnId)`是底层结算入口，不检查阶段或距离。自动拾取统一通过PlayerPickupCollector，外部不要直接调用底层入口代替检测。满血仍消费血包，死亡不拾取；奖励通知与对象池复用仍沿用原有SpawnId和一次性消费保护。
+
+复现：初始化后先不开许可，物品放在玩家位置也不消费；开启后将物品从1.01单位移到1单位，应结算并归还。高度差1.01单位时不能拾取，高度差1单位时可以。暂停期间将物品移近，经验与HP保持不变；恢复后按新的玩家位置检测。重复拾取、旧SpawnId、玩家死亡或换生命、波末直接ReturnAll均不得重复发奖。
+
+本轮验证：Unity 2022.3.62f3隔离工程通过48项真实Play Mode检查（`PICKUP_PLAY_PASS=48`）及11项Prefab保存/重导入、组件、网格、材质和半径检查（`PICKUP_ASSET_PASS=11`）。覆盖边界/高度/斜向距离、许可关闭与恢复、同帧回调关闭许可、死亡/生命更换、禁用与重新绑定、旧调用兼容、同步重复拾取、对象池回调复用、EnemyDrops传递引用和清场无奖励。17份被测源码及meta、两个实际Prefab与交付版本一致。Prefab由Unity保存，本轮各只增加`pickupRadius: 1`。临时工程已清理；未进行团队2022.3.62f3c1整项目、正式玩家或GameSystem场景接线验收。
+
+### 玩家受伤与无敌（2026-10-21）
+
+本轮由葛亮亮确认两项规则：按请求调用顺序，第一笔实际扣血的伤害立即触发无敌，期间其余请求忽略；暂停和Upgrade期间禁止玩家受伤，并冻结剩余无敌时间，恢复战斗后继续计时。这里只定义玩家受伤行为，不替其他系统决定暂停策略。
+
+新增 `PlayerDamageReceiver`，使用现有 `CombatRulesConfig.PlayerInvulnerabilityTime`（当前0.5秒）与玩家 `Health`。无效伤害、未初始化、死亡、旧生命、未开放及无敌期间的请求返回false；无效伤害不触发无敌。Health仍是HP唯一维护者，治疗照常走Health。
+
+| 入口 / 状态 | 用法 |
+| --- | --- |
+| `Initialize(Health, CombatRulesConfig)` | 在Health初始化后，每条生命调用一次；复制无敌时长、清空计时、默认关闭受伤许可 |
+| `SetDamageEnabled(bool)` | 流程层在战斗可受伤时开启，在暂停/Upgrade/结束本局时关闭；重复设置不重置计时 |
+| `TryApplyDamage(float, int)` | 传伤害与请求产生时捕获的玩家LifeId；返回值表示实际扣血，不等于Enemy桥接的“请求已送达” |
+| `IsInitialized` | 组件与所绑定的Health仍属于同一条有效生命 |
+| `CanReceiveDamage` | 当前处于活动状态、许可开启、存活且无敌已结束 |
+| `InvulnerabilityRemaining` | 战斗时读倒计时，许可关闭时读冻结值；生命失效或死亡返回0 |
+
+接线示例（依赖由GameSystem准备；运行许可在Play Mode且Awake完成后开启）：
+
+```csharp
+health.Initialize(maxHp, initialHp, newLifeId);
+receiver.Initialize(health, combatRules);
+receiver.SetDamageEnabled(true);
+
+int requestLifeId = health.LifeId; // 在生成这次请求时记录，延迟送达时不要改读新编号。
+bool applied = receiver.TryApplyDamage(damage, requestLifeId);
+
+receiver.SetDamageEnabled(false); // 暂停或Upgrade：停止受伤，保存剩余无敌时间。
+receiver.SetDamageEnabled(true);  // 恢复战斗：继续剩余计时。
+```
+
+玩家因攻击受伤应统一经过此入口；直接调用玩家Health.TryApplyDamage会绕过无敌。敌人和Boss的Health仍可由相应伤害流程直接调用。新组件不读取Enemy类型或GameState，不实现桥接、胜负或场景接线；现有Enemy的PlayerDamageRequest没有玩家LifeId字段，正式适配时必须明确请求产生和目标编号捕获的位置，不能在迟到请求到达时临时读取新生命编号冒充原编号。
+
+计时采用“结束时刻减当前时刻”，不用协程或每帧手动扣减；无敌在Health发事件之前预先锁定，防止同步回调再次扣血。暂停时保存剩余量，恢复时重算结束时刻。使用[Unity Time.time](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Time-time.html)的游戏时间，受外部TimeScale影响；组件不修改TimeScale。暂停应使用SetDamageEnabled，不能以禁用组件代替：OnDisable会使本次初始化失效，再启用时须配合Health的新LifeId重新初始化。
+
+复现要点：100HP连续提交10和80伤害，只扣10；等待有效游戏时间0.5秒后再提交才扣血。受伤后等待约0.1秒再关闭许可，等待超过0.5秒仍保留关闭时的无敌余量，恢复后继续等待该余量。分别验证零伤害不占用无敌、HealthChanged内再次调用被拒绝、旧LifeId不影响新生命、停用后重新启用不会自动恢复受伤。可在模块临时空场景使用上述入口验证；不需要修改Game/MainMenu或正式角色Prefab。
+
+本轮验证：Unity 2022.3.62f3隔离工程，以 `-batchmode -nographics -noUpm` 运行真实Play Mode，49项断言通过（`PLAYER_DAMAGE_PASS=49`）；另有1项新组件Prefab保存/重导入检查通过（`DAMAGE_PREFAB_PASS=1`），无Missing Script。覆盖无效/同帧/无敌期伤害、暂停超过原无敌时限后的恢复、同步回调重入与复用、生命周期及配置快照；运行检查无错误，编辑器正常退出。16份被测源码与工作区一致，临时工程已清理。未进行团队2022.3.62f3c1整项目、Enemy正式桥接或公共场景联调。
 
 ### 2026-10-18教学可读性整理
 
@@ -20,18 +93,20 @@ Health使用Mathf.Min/Max表达血量上下限，去掉通知前多余的临时�
 
 ### 交付资源与接线边界
 
-本模块保留Health、CombatMath、PlayerStats、EnemyDrops、ExpOrb、HealthPack，以及 `Assets/KWC/Prefabs/Combat` 的经验球/血包Prefab与占位材质。Prefab根节点分别挂ExpOrb、HealthPack，没有Collider、自动拾取或吸附；由GameSystem提供两个独立对象池并调用现有初始化入口。
+本模块保留Health、CombatMath、PlayerStats、EnemyDrops、ExpOrb、HealthPack，并新增PlayerDamageReceiver和PlayerPickupCollector，以及 `Assets/KWC/Prefabs/Combat` 的经验球/血包Prefab与占位材质。Prefab根节点分别挂ExpOrb、HealthPack，已支持绑定后的距离拾取，没有Collider或吸附；由GameSystem提供两个独立对象池并注入玩家拾取组件。
 
 当前测试场景仍运行GameSystem原有测试逻辑，F4不代表本模块真实Health/掉落链路。波末回血、进入Upgrade、阶段购买开关、敌人/Boss生命初始化和回收编排需由GameSystem/Enemy Owner接入。Combat已提供TryHeal、SetPurchasingEnabled、HealthChanged/Died和掉落/拾取结算入口，不再接管流程。
 
 
-- `Health`：当前/最大 HP 的唯一维护者，提供伤害、治疗、生命结束与一次性死亡通知。它是通用生命结算组件，玩家的0.5秒无敌、阵营/有效命中判定由下一轮伤害流程接入。
+- `Health`：当前/最大 HP 的唯一维护者，提供伤害、治疗、生命结束与一次性死亡通知。
+- `PlayerDamageReceiver`：玩家受伤入口，处理首笔有效伤害后的0.5秒无敌、受伤许可与冻结/恢复。阵营/有效命中判定及Enemy请求适配仍待联合接线。
 - `PlayerStats`：实现 `IPlayerStats`，维护玩家运行时属性、经验、等级、成长点和三项属性阶数。HP直接读取对应 `Health`；攻击力、移动速度、攻速从 `PlayerBaseConfig` 初始化，购买后使用成长配置重算，不修改配置资产。经验增加、连续升级和成长点发放也由本组件统一完成。
 - `CombatMath`：实现攻击间隔、伤害、目标等级经验门槛、属性增量和最终值公式。属性等级允许超过20；浮点伤害保留公式结果，没有增加取整规则。
 - `EnemyDrops`：对普通敌人的一次有效死亡申请经验球和血包，使用外部提供的两个 `IObjectPool`；掉落与回收的顺序由流程层控制。
-- `ExpOrb` / `HealthPack`：处理一次拾取的经验或治疗结算，并归还所属对象池。外部确认拾取条件后调用，不内置距离检测。
+- `PlayerPickupCollector`：读取玩家位置，检查拾取许可、玩家生命与物品距离；不接管玩家移动或阶段切换。
+- `ExpOrb` / `HealthPack`：每帧向绑定的PlayerPickupCollector请求距离检测，处理一次拾取的经验或治疗结算，并归还所属对象池。
 
-已支持经验升级、攻击/移动/攻速三项属性购买，以及普通敌人掉落和两种拾取物的内部结算；`GetAttributeRank` 返回实际阶数，HP暂时返回0。武器、子弹、靠近拾取检测和HP购买尚未实现；经验球与血包Prefab已交付；场景和池接线由GameSystem负责。
+已支持经验升级、攻击/移动/攻速三项属性购买，以及普通敌人掉落、靠近拾取和奖励结算；`GetAttributeRank` 返回实际阶数，HP暂时返回0。武器、子弹和HP购买尚未实现；经验球与血包Prefab已交付；场景、玩家引用、阶段许可和池接线由GameSystem负责。
 
 ### 初始化与生命周期
 
@@ -105,10 +180,10 @@ int requiredExp = playerStats.ExpToNextLevel;
 
 | 接口 | 调用时机与结果 |
 |---|---|
-| `EnemyDrops.Initialize(health, boss, rules, orbPool, packPool)` | 每次敌人生成，先初始化Health，再传入配置及两个池；同一Health生命不能重复初始化掉落组件 |
+| `EnemyDrops.Initialize(health, boss, rules, orbPool, packPool, collector = null)` | 每次敌人生成，先初始化Health，再传入配置、两个池及可选拾取组件；同一Health生命不能重复初始化掉落组件 |
 | `EnemyDrops.TryDrop(expectedLifeId)` | 真实死亡链路中，Enemy进入Dead后、回收前调用；接受本次请求返回true，存活、重复、过期或已清理请求返回false；生成回调中若清场或复用敌人，停止剩余掉落 |
-| `ExpOrb.Initialize(ownerPool, expAmount)` | 池的Rent初始化委托内调用，设置所属池、经验和新SpawnId |
-| `HealthPack.Initialize(ownerPool, healthRatio)` | 同上，设置治疗比例和新SpawnId |
+| `ExpOrb.Initialize(ownerPool, expAmount, pickupCollector = null)` | 池的Rent初始化委托内调用，设置所属池、经验、新SpawnId及本次拾取绑定 |
+| `HealthPack.Initialize(ownerPool, healthRatio, pickupCollector = null)` | 同上，设置治疗比例、新SpawnId及本次拾取绑定 |
 | `TryCollect(playerStats / playerHealth, expectedSpawnId)` | 外部确认有效拾取后调用；true表示已消费并结算，false表示未消费；调用方不用再次发奖励或Return |
 | `SpawnId` / `CanCollect` | 当前生成编号与是否尚可消费；CanCollect不代表已经满足距离、阶段等拾取条件 |
 
@@ -133,7 +208,7 @@ bool usedPack = healthPack.TryCollect(playerHealth, packId);
 
 拾取组件先锁定本次消费，再同步修改玩家状态并通知监听者，最后归还池；重复请求不会再次发奖。每次Initialize递增SpawnId，旧请求不能消费复用后的对象。监听者仍遵守前述通知约定，不能抛异常中断结算链路。池/Prefab配置错误会直接报错，应修正配置，不要在同一死亡中反复重试掉落。
 
-波末调用各PrefabPool的 `ReturnAll()`，不要调用TryDrop或TryCollect模拟清理；OnDisable只使入口失效，不增加经验、不治疗、不产生掉落。两个掉落Prefab已交付；拾取距离检测、玩家引用与阶段许可、池引用、死亡及波末流程接线仍待对应Owner联调。
+波末调用各PrefabPool的 `ReturnAll()`，不要调用TryDrop或TryCollect模拟清理；OnDisable只使入口失效，不增加经验、不治疗、不产生掉落。两个掉落Prefab和拾取距离检测已交付；玩家引用与阶段许可、池引用、死亡及波末流程接线仍待对应Owner联调。
 
 ### 校验范围与接线状态
 
@@ -151,7 +226,7 @@ bool usedPack = healthPack.TryCollect(playerHealth, packId);
 
 此次隔离工程只载入Combat、必要Core/配置及现有PrefabPool；本机包管理器启动失败后使用 `-noUpm` 完成检查。它不等于整个KWC编译、公共场景、物理交互或Windows构建验收。团队基线2022.3.62f3c1与本机2022.3.62f3不同，PR未修改项目版本或包配置；基线版本整项目复核仍待Reviewer执行。临时工程与验证产物不入库，完成后清理。
 
-Enemy的 `ICombatBridge` 仍为待Review提案，本轮没有修改其接口或接通真实战斗。后续先确认玩家无敌计时、多来源受伤、购买HP变化及拾取距离，再接入相应玩法。
+Enemy的 `ICombatBridge` 仍为待Review提案，本模块没有修改其接口或接通真实战斗。玩家无敌计时和多来源受伤已按本页2026-10-21记录实现组件，靠近拾取已按2026-10-23记录实现，正式接线仍待协作；购买HP变化继续待确认。
 
 ### Reviewer最小复现步骤
 
