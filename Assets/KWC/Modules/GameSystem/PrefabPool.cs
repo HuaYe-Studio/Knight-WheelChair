@@ -17,6 +17,9 @@ namespace KWC.GameSystem
 
         public int BorrowedCount => borrowed.Count;
 
+        public event Action<GameObject> Rented;
+        public event Action<GameObject> Returned;
+
         public GameObject Rent(Vector3 position, Quaternion rotation, Action<GameObject> initialize)
         {
             if (prefab == null)
@@ -55,6 +58,7 @@ namespace KWC.GameSystem
 
             borrowed.Add(instance);
             instance.SetActive(true);
+            Rented?.Invoke(instance);
             return instance;
         }
 
@@ -68,6 +72,7 @@ namespace KWC.GameSystem
             instance.SetActive(false);
             instance.transform.SetParent(inactiveRoot, false);
             available.Enqueue(instance);
+            Returned?.Invoke(instance);
             return true;
         }
 
@@ -91,6 +96,24 @@ namespace KWC.GameSystem
             storage.SetActive(false);
             storage.transform.SetParent(transform, false);
             inactiveRoot = storage.transform;
+        }
+
+        /// <summary>
+        /// 把当前借出实例拷贝到 buffer（先清空再写入），供订阅者启用时补一次快照。
+        /// 只读取副本，不修改池状态；已销毁的实例会被跳过。
+        /// 大概仅仅用于gamesystem内部
+        /// </summary>
+        public void CopyBorrowedTo(List<GameObject> buffer)
+        {
+            if(buffer == null)
+                return;
+
+            buffer.Clear();
+            foreach (var instance in borrowed)
+            {
+                if (instance != null)
+                    buffer.Add(instance);
+            }
         }
     }
 }
