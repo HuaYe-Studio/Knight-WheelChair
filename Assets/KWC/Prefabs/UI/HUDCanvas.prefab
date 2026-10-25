@@ -374,7 +374,7 @@ GameObject:
   - component: {fileID: 4653324845681983431}
   - component: {fileID: 8408883535770610580}
   m_Layer: 5
-  m_Name: PlayerMoveSpeedIcon
+  m_Name: PlayerMoveSpeedText
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -964,12 +964,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerHealthText: {fileID: 4042147247486792038}
   playerExperienceText: {fileID: 5734535204831532847}
-  playerLevelText: {fileID: 0}
-  playerAttackText: {fileID: 0}
-  playerAttackSpeedText: {fileID: 0}
-  playerMoveSpeedText: {fileID: 0}
-  waveIndexText: {fileID: 0}
-  waveTimeText: {fileID: 0}
+  playerLevelText: {fileID: 4301941640844385693}
+  playerAttackText: {fileID: 7540787636215074361}
+  playerAttackSpeedText: {fileID: 2313059035500976842}
+  playerMoveSpeedText: {fileID: 8408883535770610580}
+  waveIndexText: {fileID: 3723096259247080420}
+  waveTimeText: {fileID: 4588949747685327065}
   playerHealth: {fileID: 0}
   playerStats: {fileID: 0}
   spawnScheduler: {fileID: 0}
