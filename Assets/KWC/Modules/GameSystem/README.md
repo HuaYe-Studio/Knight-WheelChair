@@ -4,13 +4,13 @@
 
 - `GameManager`：场景级状态及事件；没有单例、波次循环或胜负仲裁实现。
 - `DevelopmentLauncher`：临时工程启动面板，正式 UI 接入时移除。
-- `PrefabPool`：每 Prefab 一个组件，Rent 初始化后启用；ReturnAll 只清理，不是击杀；对外提供 `Prefab`、借用计数与 Rented/Returned 事件。
+- `PrefabPool`：每 Prefab 一个组件，Rent 初始化后启用；ReturnAll 只清理，不是击杀；对外提供 `Prefab`、`BorrowedCount`（借出计数）、`Rent`/`Return`/`ReturnAll`。
 - `Configuration`：SO 类型；实例位于 `Assets/KWC/Data`，GameConfig 组合引用。
 - `SpawnWarning`：池化的一次性预警对象（红圈）。初始化口接收"时长 + 到点回调"，可中途取消，复用时归零。
 - `Spawn`：`SpawnScheduler` 只负责波次计时、预警、生成计数与波末判定；敌人池、死亡队列、掉落与回收已拆到 `EnemyLifeCycle`。`TestDriver` 是测试按键驱动。
-- `CombatWiring`：`PlayerInitializer` 负责玩家本局初始化与承伤；`EnemyCombatBridge` 实现 Enemy 的 ICombatBridge；`TestPickupCollector` 是开发期拾取接线。
+- `CombatWiring`：`PlayerInitializer`（玩家初始化与承伤入口）负责 Health/PlayerStats 以及正式承伤/拾取组件的初始化；`EnemyCombatBridge`（敌人战斗桥）实现 Enemy 的 `ICombatBridge`（战斗桥接接口）。统一使用 Combat 的 `PlayerDamageReceiver`（玩家受伤入口）与 `PlayerPickupCollector`（玩家拾取入口）。
 - `EnemyWiring`：`EnemyLifeCycle` 负责敌人生成、死亡、掉落与回收；`TestPlayerContext` 是假玩家；`TestBossInitializer` 是 Boss 初始化占位。
-- `SessionFlow`：场景内本局流程，按“玩家 → 敌人 → 波次”的顺序组织初始化，并处理玩家死亡与波末回血。
+- `SessionFlow`：场景内本局流程，按“玩家 → 敌人 → 波次”的顺序组织初始化，按 `GameState`（游戏状态）切换承伤/拾取许可，并处理玩家死亡与波末回血。
 
 ## SpawnWarning 生命周期（初始化 / 完成 / 取消 / 归还）
 
@@ -35,24 +35,25 @@
 
 ## 敌人生命周期（EnemyLifeCycle）
 
-- `TryInitialize(GameConfig, IPlayerContext)`：流程层在玩家就绪后调用；校验 Enemy1/CombatRules、三个对象池（敌人/经验球/血包）、玩家就绪状态，以及敌人 Prefab 上的 Enemy1Controller、SimpleMovementHandler、PhysicsContactSource、EnemyCombatBridge、Health、EnemyDrops；同时校验两个掉落 Prefab 的组件。失败保持未就绪。
-- 生成顺序：`TryGenerateEnemy1` → `enemyPool.Rent`（停用状态下执行初始化）→ contact.Initialize → controller.Initialize（推进 LifeId、建立状态机）→ Health.Initialize（用新 LifeId）→ EnemyDrops.Initialize（依赖 Health 已初始化）→ bridge.Initialize（最后订阅）→ 激活。
+- `TryInitialize(GameConfig, IPlayerContext)`：流程层在玩家就绪后调用；校验 Enemy1/CombatRules、三个对象池（敌人/经验球/血包）、玩家就绪状态（含 `PlayerDamageReceiver` 已初始化），以及敌人 Prefab 上的 Enemy1Controller、SimpleMovementHandler、PhysicsContactSource、EnemyCombatBridge、Health、EnemyDrops；同时校验两个掉落 Prefab 的组件。失败保持未就绪。
+- 生成顺序：`TryGenerateEnemy1` → `enemyPool.Rent`（停用状态下执行初始化）→ contact.Initialize → controller.Initialize（推进 LifeId、建立状态机）→ Health.Initialize（用新 LifeId）→ EnemyDrops.Initialize（依赖 Health 已初始化，并传入玩家当前的 `PlayerPickupCollector`）→ bridge.Initialize（最后订阅）→ 激活。
 - 死亡入口：`EnqueueDeath(enemy, lifeId)` 只入队；`LateUpdate` 逐条执行 `EnemyDrops.TryDrop(lifeId)`，再 `RecycleEnemy`。掉落失败也会在 finally 中回收。
 - `RecycleEnemy`：先校验 lifeId 与控制器当前 LifeId，再移出存活列表并 `EnemyReset`（ResetContact → ResetForReuse → Return）；编号过期一律拒绝。
-- `ClearEnemySpawnState()`：波末/中止清理；复位并回收所有在场敌人，归还经验球与血包，清空死亡队列；不触发掉落、经验或击杀。
+- `ClearEnemySpawnState()`：波末/中止清理；复位并回收所有在场敌人，归还经验球与血包，清空死亡队列；不触发掉落、经验或击杀。成功波末也走这条路径，未拾取掉落直接 `ReturnAll`，不结算经验（见「已知限制」）。
 - `GetLivedEnemyCount()`：存活列表数量，供波次提前结束判定。
 
 ## 玩家初始化与承伤（PlayerInitializer / EnemyCombatBridge）
 
-- `PlayerInitializer.TryInitialize(GameConfig)`：流程层在 Playing 时调用；幂等，已就绪直接返回 true。顺序固定为 Health → PlayerStats，lifeId 来自 Health 当前编号 + 1。
-- `IsReady`：已初始化、Health/PlayerStats 有效且玩家未死亡；`EnemyLifeCycle.TryInitialize` 以它为前置条件。
-- `TryReceiveDamage`：校验攻击方、就绪状态与 0.5 秒无敌窗口，再调用 `Health.TryApplyDamage`；返回是否实际扣血。
-- `EnemyCombatBridge`：每个敌人实例一个，初始化时订阅 Health 的 HealthChanged/Died，OnDisable 解绑。HealthChanged 只同步 HP 事实；Died 经控制器进入 Dead。`TrySubmitPlayerDamage` 返回玩家是否真正接受伤害，无敌时返回 false，FSM 会在下一个决策帧重试；`NotifyEnemyDied` 带上 lifeId 交给 `EnemyLifeCycle`。
+- `PlayerInitializer.TryInitialize(GameConfig, IPlayerContext)`：流程层在 Playing 时调用；幂等，已就绪直接返回 true。顺序固定为 Health → PlayerStats → `PlayerDamageReceiver` → `PlayerPickupCollector`，lifeId 来自 Health 当前编号 + 1；任一初始化失败保持未就绪。
+- `IsReady`：已初始化、Health/PlayerStats/`PlayerDamageReceiver` 有效、`PlayerPickupCollector` 已注入且玩家未死亡；`EnemyLifeCycle.TryInitialize` 以它为前置条件。
+- `TryReceiveDamage(PlayerDamageRequest)`：同步送达，直接使用调用时的玩家 `Health.LifeId` 调 `PlayerDamageReceiver.TryApplyDamage`；无敌、死亡、未开放或旧生命由 Receiver 拒绝并返回 false。若以后改成排队/延迟请求，必须把请求发生时的 LifeId 随请求带入。
+- `EnemyCombatBridge`：每个敌人实例一个，初始化时订阅 Health 的 HealthChanged/Died，OnDisable 解绑。HealthChanged 只同步 HP 事实；Died 经控制器进入 Dead。`TrySubmitPlayerDamage` 的返回值只表示请求已送达玩家承伤入口，**不表示实际扣血**：无敌/未开放时仍返回 true，攻击节流照常计一次，FSM 不再逐决策帧重试；`NotifyEnemyDied` 带上 lifeId 交给 `EnemyLifeCycle`。
 
 ## 本局流程（SessionFlow）
 
-- 场景启用：校验 GameManager 配置、SpawnScheduler、TestPlayerContext、TestPickupCollector 与 PlayerInitializer 引用；订阅 WaveEnded、玩家 Health.Died、GameStateChanged。`enemyLifeCycle` 在进入 Playing 时补查，缺失会报错并中止。
-- 进入 Playing：`hasStarted` 保证只执行一次；顺序为 `PlayerInitializer.TryInitialize` → `EnemyLifeCycle.TryInitialize` → `SpawnScheduler.InitializeWave`。`Start` 还会补一次当前状态快照，防止 BeginSession 在 Awake 阶段被调用时漏掉事件。
+- 场景启用：校验 GameManager 配置、SpawnScheduler、TestPlayerContext 与 PlayerInitializer（含 `PlayerDamageReceiver` / `PlayerPickupCollector` 引用）；订阅 WaveEnded、玩家 Health.Died、GameStateChanged。`enemyLifeCycle` 在进入 Playing 时补查，缺失会报错并中止。
+- 进入 Playing：`hasStarted` 保证只执行一次；顺序为 `PlayerInitializer.TryInitialize` → 同步开启承伤/拾取许可 → `EnemyLifeCycle.TryInitialize` → `SpawnScheduler.InitializeWave`。`Start` 还会补一次当前状态快照，防止 BeginSession 在 Awake 阶段被调用时漏掉事件。
+- 阶段许可：每次 `GameStateChanged` 按 `gameState == Playing` 调 `SetDamageEnabled` / `SetPickupEnabled`；Upgrade、Paused、Victory、GameOver 关闭许可。`PlayerDamageReceiver` 会冻结/恢复无敌剩余时间，`PlayerPickupCollector` 只切许可。
 - 波末：`WaveEnded` 后回满玩家 HP。
 - 玩家死亡：`Died` 只置标记；`LateUpdate` 先 `StopWave`（取消预警、回收敌人与拾取物），再 `CompleteSession(GameOver)`。
 - `OnDisable` 解绑事件并复位 `isInitialized/hasStarted`。
@@ -70,14 +71,16 @@
 
 - `SpawnScheduler`：`Initialize(GameConfig)`、`InitializeWave()`、`StopWave()`（幂等）；只读 `GetWaveIndex()`、`IsInWave()`、`IsInBossWave()`（仅在 Boss 波**运行中**为 true；占位实现下恒为 false）、`GetWaveTime()`（未开波 -1、Boss 波 Infinity）；事件 `WaveChanged(int)`、`WaveEnded`（仅正常波末，发出时清理已完成且 `waveIndex` 已指向下一波）。
 - `EnemyLifeCycle`：`TryInitialize(GameConfig, IPlayerContext)`、`TryGenerateEnemy1(...)`、`EnqueueDeath(enemy, lifeId)`、`ClearEnemySpawnState()`、`RecycleEnemy(enemy, lifeId)`（死亡回收；携带发起时捕获的 LifeId，编号过期即拒绝）、`GetLivedEnemyCount()`；`isInitialized` 供流程层检查就绪。
-- `PlayerInitializer`：`TryInitialize(GameConfig)`、`TryReceiveDamage(PlayerDamageRequest)`、`IsReady`、`PlayerHealth`、`PlayerStats`。
+- `PlayerInitializer`：`TryInitialize(GameConfig, IPlayerContext)`、`TryReceiveDamage(PlayerDamageRequest)`、`IsReady`、`PlayerHealth`、`PlayerStats`、`PlayerDamageReceiver`、`PlayerPickupCollector`。
+- Combat 提供的正式组件：`PlayerDamageReceiver`（承伤/无敌；`SetDamageEnabled`、`TryApplyDamage`、`CanReceiveDamage`、`InvulnerabilityRemaining`）、`PlayerPickupCollector`（靠近拾取；`SetPickupEnabled`、`CanCollect`、`TryCollect`，由物品自身每帧请求）。
 - `EnemyCombatBridge`：Enemy 的 `ICombatBridge` 实现，挂在 Enemy1 Prefab 上；每次租出时由 `EnemyLifeCycle` 调用 `Initialize`。
-- `PrefabPool`：`Prefab`、`BorrowedCount`、`Rent`、`Return`、`ReturnAll`、`CopyBorrowedTo`、`Rented`/`Returned` 事件。
-- `SessionFlow`：没有对外方法；场景内的流程入口，订阅 GameStateChanged 后组织初始化与结束。
+- `PrefabPool`：`Prefab`、`BorrowedCount`、`Rent`、`Return`、`ReturnAll`。
+- `SessionFlow`：没有对外方法；场景内的流程入口，订阅 GameStateChanged 后组织初始化、阶段许可与结束。
 
 ## 测试（测试件，正式接线后替换）
 
 - 场景：`Assets/KWC/Prefabs/GameSystem/Scene/TestSpawnWarningScene.unity`；驱动：`TestDriver`（F1 开波 / F2 停止 / F3 同步复用复现 / F4 杀敌测试 / F5 迟到回收测试）。
+- 接触攻击依赖物理接触：仓库中的 `TestEnemyCube.prefab` 和测试场景当前没有 Collider/Rigidbody。本地验证 `ContactAttack` 时需临时给敌人加  Rigidbody +  Collider、给 `TestPlayerContext` 所在 Transform 加 Collider；正式碰撞层待确认。
 - 复现步骤：
     1. 正常：F1 → 每 5 秒一个红圈，0.5 秒后从敌人池借出测试敌人；5 个后停发；30 秒波末清场、`BorrowedCount` 归 0；再 F1 走 Wave 2。
     2. 取消：勾 `useTestWaveTime`、值 0.3 → F1 → 波末在途预警被取消、无迟到回调。
@@ -94,6 +97,10 @@
 - 占位一致：选中 Boss 波（Wave 10）不进入运行态；快照为 inWave=false、isBoss=false、time=-1，Stop 无副作用。
 - 开波校验：`EnemyLifeCycle.TryInitialize` 拒绝缺少玩家、配置、池或 Prefab 组件的接线；`SpawnScheduler.InitializeWave` 拒绝未就绪的生命周期。两者都不产生 NRE，失败时 BorrowedCount 保持 0。
 - 初始化顺序：`SessionFlow.hasStarted` 保证只走一次“玩家 → 敌人 → 波次”；`PrefabPool.Rent` 在激活前完成初始化，敌人不会用旧生命数据 tick。
+- 无敌时序：首笔有效伤害先占用 `PlayerDamageReceiver` 的无敌，再由 `Health` 同步通知 `HealthChanged`；回调内再提交的伤害被拒，100 HP 受到 10 伤害后保持 90。
+- 桥接送达：`EnemyCombatBridge.TrySubmitPlayerDamage` 在有效请求交给玩家承伤入口后返回 true；无敌期间攻击节流照常计一次，不逐决策帧重试。
+- 拾取接线：`PlayerPickupCollector` 由物品自身每帧请求，消费时读取当前 `SpawnId`；不再使用跨帧快照，重借后的新物品不会被旧引用误消费。
+- 阶段许可：仅 Playing 开放承伤/拾取；Upgrade、Paused、Victory、GameOver 关闭，无敌剩余时间冻结。
 
 ## 当前测试策略（正式规则待确认）
 
@@ -101,6 +108,12 @@
 - 随机出生范围：围绕原点的 ±10 方框（等 Map 接口与最小出生距离）。
 - 尾批不足：暂定发剩余数量（待策划确认）。
 
+## 已知限制（本次接线）
+
+- 成功波末是否应清掉未拾取掉落尚未确认：`EndWave`（正常波末）与 `StopWave`（中止）共用清场路径，未拾取物品直接 `ReturnAll` 且不结算经验；最后一批敌人的掉落可能来不及拾取，同一波经验总量会波动。
+- 仓库中的 `TestEnemyCube.prefab` 与测试场景没有 Collider/Rigidbody，接触攻击只能在临时加物理的环境验证；正式碰撞层与 Layer Matrix 待确认。
+- 未拾取掉落的最终归属（保留 / 自动结算 / 丢弃）待设计确认。
+
 ## 未决项
 
-最小出生距离、首批时间、尾批处理、找不到出生点、Wave 10 约 20 的确切上限；不要绕过 `TryGetActualSpawnCount` 的 false。暂停/升级的子系统许可、同时死亡优先级、最终升级、保存字段/时机、池容量/不足策略和性能指标也尚未决定。玩家 0.5 秒无敌当前由 `PlayerInitializer` 暂管，规则确认后交回 Combat；正式 Player/UI 接入后替换 TestPlayerContext、TestPickupCollector 与 TestDriver。
+最小出生距离、首批时间、尾批处理、找不到出生点、Wave 10 约 20 的确切上限；不要绕过 `TryGetActualSpawnCount` 的 false。暂停/升级的子系统许可、同时死亡优先级、最终升级、保存字段/时机、池容量/不足策略和性能指标也尚未决定。玩家 0.5 秒无敌已由 Combat 的 `PlayerDamageReceiver` 管理；正式 Player/UI 接入后替换 TestPlayerContext 与 TestDriver。

@@ -81,8 +81,8 @@ namespace KWC.GameSystem
 
         /// <summary>
         /// Enemy → 流程的伤害请求。只接受本实例的控制器。
-        /// 返回 PlayerInitializer 是否真正接受并结算了这次伤害；无敌或玩家未就绪时返回 false，
-        /// FSM 会在下一个决策帧重试。这与 ICombatBridge 原先“只表示送达”的注释不同，需同步契约说明。
+        /// 返回值只表示请求已送达玩家承伤入口，不表示实际扣血：
+        /// 玩家无敌/未开放时仍返回 true，攻击节流照常计一次，避免逐决策帧重试。
         /// </summary>
         public bool TrySubmitPlayerDamage(PlayerDamageRequest request)
         {
@@ -92,8 +92,8 @@ namespace KWC.GameSystem
             if(playerInitializer == null)
                 return false;
 
-            //若无敌会拒绝，下个决策帧再试
-            return playerInitializer.TryReceiveDamage(request);
+            playerInitializer.TryReceiveDamage(request);
+            return true;
         }
 
         /// <summary>

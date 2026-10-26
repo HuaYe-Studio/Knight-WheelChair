@@ -469,7 +469,6 @@ MonoBehaviour:
   spawnScheduler: {fileID: 308383838}
   player: {fileID: 1290003971}
   testPlayerContext: {fileID: 1290003974}
-  testPickupCollector: {fileID: 1855322376}
   enemyLifeCycle: {fileID: 1458790235}
 --- !u!4 &1161746583
 Transform:
@@ -501,6 +500,7 @@ GameObject:
   - component: {fileID: 1290003972}
   - component: {fileID: 1290003971}
   - component: {fileID: 1290003974}
+  - component: {fileID: 1290003975}
   m_Layer: 0
   m_Name: TestPlayer
   m_TagString: Untagged
@@ -587,6 +587,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerHealth: {fileID: 1290003972}
   playerStats: {fileID: 1290003973}
+  playerDamageReceiver: {fileID: 1290003975}
+  playerPickupCollector: {fileID: 1855322378}
   initialLevel: 1
   initialExp: 0
   initialGrowthPoints: 0
@@ -625,6 +627,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2b5350a1d5a34f8a886a9b1399a80e87, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &1290003975
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1290003966}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c66050ad01c74f46957ef354e21377bd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
 --- !u!1 &1406406171
@@ -775,7 +789,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1855322377}
-  - component: {fileID: 1855322376}
+  - component: {fileID: 1855322378}
   m_Layer: 0
   m_Name: Collector
   m_TagString: Untagged
@@ -783,22 +797,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1855322376
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1855322375}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7507e3e298424220a91f2c7b8fdf8731, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  player: {fileID: 1290003971}
-  expOrbPool: {fileID: 1406406173}
-  healthPackPool: {fileID: 435348539}
-  collectRadius: 1.5
 --- !u!4 &1855322377
 Transform:
   m_ObjectHideFlags: 0
@@ -814,6 +812,18 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1855322378
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1855322375}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ce28d0ad3750466b9b882dafc011364c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1949215291
 GameObject:
   m_ObjectHideFlags: 0

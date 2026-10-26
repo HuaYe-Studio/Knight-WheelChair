@@ -11,6 +11,7 @@ namespace KWC.GameSystem
     /// <summary>
     /// 敌人本局生命周期：从对象池生成 Enemy1、初始化其 Combat 组件、接收死亡上报，
     /// 并在 LateUpdate 统一执行“先掉落、后回收”。同时负责波末回收敌人与拾取物。
+    /// 掉落的经验球/血包绑定玩家当前的 PlayerPickupCollector（玩家拾取入口），由物品自身每帧请求距离检测。
     /// 未就绪时 TryGenerateEnemy1 返回 false，不会创建半初始化对象。
     /// </summary>
     public class EnemyLifeCycle:MonoBehaviour
@@ -78,6 +79,7 @@ namespace KWC.GameSystem
 
         /// <summary>
         /// 由流程层在玩家就绪后调用：校验配置、三个对象池和敌人 Prefab 的必需组件。
+        /// 拾取入口直接取 PlayerInitializer.PlayerPickupCollector，不再单独序列化一份。
         /// 会先清除 isInitialized，校验失败时保持未就绪，不会生成敌人。
         /// </summary>
         public bool TryInitialize(GameConfig E1Config,IPlayerContext context)
@@ -141,8 +143,6 @@ namespace KWC.GameSystem
             }
 
             #endregion
-
-
 
             enemyConfig = E1Config;
             playerContext = context;
@@ -228,7 +228,8 @@ namespace KWC.GameSystem
         }
 
         // 顺序不可交换：controller.Initialize 先推进 LifeId，Health 才能用新编号建立生命；
-        // EnemyDrops 依赖 Health 已初始化；桥接最后订阅，避免收到上一条命的事件。
+        // EnemyDrops 依赖 Health 已初始化，并从 PlayerInitializer 取得正式拾取入口；
+        // 桥接最后订阅，避免收到上一条命的事件。
         private void InitializeEnemy1(GameObject enemyGo,float hp,float attack)
         {
             var controller = enemyGo.GetComponent<Enemy1Controller>();
@@ -252,7 +253,7 @@ namespace KWC.GameSystem
             );
 
             E1Health.Initialize(hp,hp,controller.LifeId);
-            E1Drop.Initialize(E1Health,false,enemyConfig.CombatRules,expOrbPool,healthPackPool);
+            E1Drop.Initialize(E1Health,false,enemyConfig.CombatRules,expOrbPool,healthPackPool,player.PlayerPickupCollector);
             bridge.Initialize(controller,E1Health,player,this);
         }
 

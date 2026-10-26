@@ -1,12 +1,14 @@
 ﻿using KWC.Core;
 using UnityEngine;
+using KWC.Combat;
 
 namespace KWC.GameSystem
 {
     /// <summary>
     /// 场景内本局流程：校验引用、订阅波末/玩家死亡/状态事件，
     /// 在进入 Playing 时按“玩家初始化 → 敌人生命周期就绪 → 开始波次”的顺序组织调用，
-    /// 并在 LateUpdate 处理玩家死亡（先停波，再提交 GameOver）。
+    /// 并按 GameState 切换玩家承伤/拾取许可（仅 Playing 开放）。
+    /// 在 LateUpdate 处理玩家死亡（先停波，再提交 GameOver）。
     /// 它不拥有波次、敌人或战斗数据，只负责调用顺序与生命周期边界。
     /// </summary>
     public class SessionFlow:MonoBehaviour
@@ -15,8 +17,6 @@ namespace KWC.GameSystem
         [SerializeField] private SpawnScheduler spawnScheduler;
         [SerializeField] private PlayerInitializer player;
         [SerializeField] private TestPlayerContext testPlayerContext;
-
-        [SerializeField] private TestPickupCollector testPickupCollector;
         [SerializeField] private EnemyLifeCycle enemyLifeCycle;
 
         private bool isPlayerDead = false;
@@ -64,13 +64,8 @@ namespace KWC.GameSystem
                 return;
             }
 
-            if (testPickupCollector == null || !testPickupCollector.Initialize(testPlayerContext))
-            {
-                Debug.LogError("assign the initialized pickup collector before starting playing.", this);
-                return;
-            }
-
-            if (player == null || player.PlayerHealth == null || player.PlayerStats == null)
+            if (player == null || player.PlayerHealth == null || player.PlayerStats == null ||
+                player.PlayerDamageReceiver == null || player.PlayerPickupCollector == null)
             {
                 Debug.LogError("assign the player Initializer before starting a wave.", this);
                 return;
@@ -114,17 +109,22 @@ namespace KWC.GameSystem
 
         private void HandleStarted(GameState gameState)
         {
-            if(gameState != GameState.Playing)
+            if(!isInitialized)
                 return;
 
-            if(!isInitialized )
+            // 先同步阶段许可；组件尚未初始化时，setter 会自行忽略。
+            ApplyPlayerPhasePermission(gameState);
+
+            if(gameState != GameState.Playing)
                 return;
 
             if (hasStarted)
                 return;
 
-            if(!player.TryInitialize(gameManager.Config))
+            if(!player.TryInitialize(gameManager.Config,testPlayerContext))
                 return;
+
+            ApplyPlayerPhasePermission(gameState);
 
             if (enemyLifeCycle == null || !enemyLifeCycle.TryInitialize(gameManager.Config, testPlayerContext))
             {
@@ -151,6 +151,11 @@ namespace KWC.GameSystem
             isPlayerDead = true;
         }
 
-
+        private void ApplyPlayerPhasePermission(GameState gameState)
+        {
+            bool isPlaying = gameState == GameState.Playing;
+            player.PlayerDamageReceiver.SetDamageEnabled(isPlaying);
+            player.PlayerPickupCollector.SetPickupEnabled(isPlaying);
+        }
     }
 }
